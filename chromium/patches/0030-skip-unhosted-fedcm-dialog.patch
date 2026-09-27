@@ -1,0 +1,25 @@
+diff --git a/chrome/browser/ui/webid/identity_dialog_controller.cc b/chrome/browser/ui/webid/identity_dialog_controller.cc
+index 8dc00b5c1e..56de21e192 100644
+--- a/chrome/browser/ui/webid/identity_dialog_controller.cc
++++ b/chrome/browser/ui/webid/identity_dialog_controller.cc
+@@ -37,6 +37,7 @@
+ // dependency checks.
+ #if !BUILDFLAG(IS_ANDROID)
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"  // nogncheck
++#include "chrome/browser/ui/views/interaction/browser_elements_views.h"  // nogncheck
+ #include "chrome/browser/ui/views/webid/fedcm_account_selection_view_desktop.h"  // nogncheck
+ #include "components/tabs/public/tab_interface.h"  // nogncheck
+ #endif
+@@ -619,6 +620,12 @@ bool IdentityDialogController::TrySetAccountView() {
+                   BrowserWindowInterface::Type::TYPE_DEVTOOLS) {
+     return false;
+   }
++  // Embedded browser windows have no Views widget to anchor the FedCM dialog.
++  auto* elements =
++      BrowserElementsViews::From(tab->GetBrowserWindowInterface());
++  if (!elements || !elements->GetPrimaryWindowWidget()) {
++    return false;
++  }
+   account_view_ = std::make_unique<webid::FedCmAccountSelectionView>(this, tab);
+ #endif
+   account_view_->SetCanShowUi(ShouldShowFedCmUi());

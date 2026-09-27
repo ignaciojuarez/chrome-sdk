@@ -1,0 +1,13 @@
+diff --git a/extensions/common/extension_features.cc b/extensions/common/extension_features.cc
+index 30be474beb28b72a54db8b0c65206eb0d66184c8..d261196704381286cf3508aeaa029293bbd83876 100644
+--- a/extensions/common/extension_features.cc
++++ b/extensions/common/extension_features.cc
+@@ -103,7 +103,7 @@ BASE_FEATURE(kApiDesktopAndroidNativeMessaging,
+ // For historical reasons, this includes some APIs. Please don't add more.
+ 
+ BASE_FEATURE(kAllowWithholdingExtensionPermissionsOnInstall,
+-             base::FEATURE_DISABLED_BY_DEFAULT);
++             base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+ BASE_FEATURE(kBlockBackgroundContentsOffExtentNavigation,
+              base::FEATURE_ENABLED_BY_DEFAULT);

@@ -1,0 +1,262 @@
+diff --git a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
+index 953895a..ca6c5cc 100644
+--- a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
++++ b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
+@@ -11,6 +11,9 @@
+ #include "base/time/default_clock.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "chrome/browser/policy/cloud/cloud_policy_invalidator.h"
+ #include "chrome/browser/policy/policy_util.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -76,9 +79,10 @@ void UserCloudPolicyInvalidator::StartExtensionInstallInvalidator() {
+ 
+ void UserCloudPolicyInvalidator::Shutdown() {
+   profile_observation_.Reset();
+-    invalidator_.reset();
++  store_observation_.Reset();
++  invalidator_.reset();
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+-    extension_install_invalidator_.reset();
++  extension_install_invalidator_.reset();
+ #endif
+ }
+ 
+@@ -87,10 +91,38 @@ void UserCloudPolicyInvalidator::OnProfileInitializationComplete(
+   DCHECK(profile_observation_.IsObservingSource(profile));
+   profile_observation_.Reset();
+ 
+-  // Initialize now that profile creation is complete and the invalidation
+-  // service can safely be initialized.
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    // Every ordinary profile owns a user cloud policy manager. Wait until its
++    // store contains active policy so an unused manager does not start GCM.
++    // Keeping the observation handles cached policy loading and later
++    // enrollment without relying on profile-initialization ordering.
++    store_observation_.Observe(policy_manager_->core()->store());
++    MaybeStart(policy_manager_->core()->store());
++    return;
++  }
++#endif
++
++  StartInvalidator();
++}
++
++void UserCloudPolicyInvalidator::MaybeStart(CloudPolicyStore* store) {
++  if (!store->is_initialized() || !store->is_managed()) {
++    return;
++  }
++  StartInvalidator();
++  if (invalidator_) {
++    store_observation_.Reset();
++  }
++}
++
++void UserCloudPolicyInvalidator::StartInvalidator() {
++  if (invalidator_) {
++    return;
++  }
++
+   invalidation::ProfileInvalidationProvider* invalidation_provider =
+-      GetInvalidationProvider(profile);
++      GetInvalidationProvider(profile_);
+   if (!invalidation_provider) {
+     return;
+   }
+@@ -104,4 +136,14 @@ void UserCloudPolicyInvalidator::OnProfileInitializationComplete(
+       base::DefaultClock::GetInstance());
+ }
+ 
++void UserCloudPolicyInvalidator::OnStoreLoaded(CloudPolicyStore* store) {
++  MaybeStart(store);
++}
++
++void UserCloudPolicyInvalidator::OnStoreError(CloudPolicyStore* store) {}
++
++void UserCloudPolicyInvalidator::OnStoreDestruction(CloudPolicyStore* store) {
++  store_observation_.Reset();
++}
++
+ }  // namespace policy
+diff --git a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h
+index 24a3826..875912b 100644
+--- a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h
++++ b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h
+@@ -11,6 +11,7 @@
+ #include "base/scoped_observation.h"
+ #include "chrome/browser/profiles/profile_observer.h"
+ #include "components/keyed_service/core/keyed_service.h"
++#include "components/policy/core/common/cloud/cloud_policy_store.h"
+ #include "extensions/buildflags/buildflags.h"
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+@@ -26,7 +27,9 @@ class CloudPolicyManager;
+ 
+ // Provides invalidations to user policy. Implemented as a
+ // KeyedService to allow profile-based lifetime management.
+-class UserCloudPolicyInvalidator : public KeyedService, public ProfileObserver {
++class UserCloudPolicyInvalidator : public KeyedService,
++                                   public ProfileObserver,
++                                   public CloudPolicyStore::Observer {
+  public:
+   // |profile| is profile associated with the invalidator. It is used to get
+   // a reference to the profile's invalidation service. Both the profile and
+@@ -48,10 +51,20 @@ class UserCloudPolicyInvalidator : public KeyedService, public ProfileObserver {
+   // ProfileObserver implementation:
+   void OnProfileInitializationComplete(Profile* profile) override;
+ 
++  // CloudPolicyStore::Observer implementation:
++  void OnStoreLoaded(CloudPolicyStore* store) override;
++  void OnStoreError(CloudPolicyStore* store) override;
++  void OnStoreDestruction(CloudPolicyStore* store) override;
++
+  private:
++  void MaybeStart(CloudPolicyStore* store);
++  void StartInvalidator();
++
+   raw_ptr<Profile> profile_;
+   base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
+   raw_ptr<CloudPolicyManager> policy_manager_;
++  base::ScopedObservation<CloudPolicyStore, CloudPolicyStore::Observer>
++      store_observation_{this};
+   std::unique_ptr<CloudPolicyInvalidator> invalidator_;
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+   std::unique_ptr<ExtensionInstallPolicyInvalidator>
+diff --git a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc
+index d2386d2..52f6a6c 100644
+--- a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc
++++ b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc
+@@ -11,7 +11,11 @@
+ 
+ #include "base/check.h"
+ #include "base/logging.h"
++#include "build/build_config.h"
+ #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "chrome/browser/policy/cloud/fm_registration_token_uploader.h"
+ #include "chrome/browser/policy/policy_util.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -50,7 +54,7 @@ namespace policy {
+ UserFmRegistrationTokenUploader::UserFmRegistrationTokenUploader(
+     Profile* profile,
+     CloudPolicyManager* policy_manager)
+-    : policy_manager_(policy_manager) {
++    : profile_(profile), policy_manager_(policy_manager) {
+   CHECK(profile);
+   CHECK(policy_manager);
+ 
+@@ -63,6 +67,7 @@ UserFmRegistrationTokenUploader::~UserFmRegistrationTokenUploader() = default;
+ 
+ void UserFmRegistrationTokenUploader::Shutdown() {
+   profile_observation_.Reset();
++  store_observation_.Reset();
+   uploaders_.clear();
+ }
+ 
+@@ -71,10 +76,37 @@ void UserFmRegistrationTokenUploader::OnProfileInitializationComplete(
+   CHECK(profile_observation_.IsObservingSource(profile));
+   profile_observation_.Reset();
+ 
+-  // Initialize now that profile creation is complete and the invalidation
+-  // service can safely be initialized.
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    // An ordinary profile's empty policy manager is not a GCM consumer. Keep
++    // observing so cached policy and later enrollment start the original
++    // uploader path after active policy is stored.
++    store_observation_.Observe(policy_manager_->core()->store());
++    MaybeStart(policy_manager_->core()->store());
++    return;
++  }
++#endif
++
++  StartUploaders();
++}
++
++void UserFmRegistrationTokenUploader::MaybeStart(CloudPolicyStore* store) {
++  if (!store->is_initialized() || !store->is_managed()) {
++    return;
++  }
++  StartUploaders();
++  if (!uploaders_.empty()) {
++    store_observation_.Reset();
++  }
++}
++
++void UserFmRegistrationTokenUploader::StartUploaders() {
++  if (!uploaders_.empty()) {
++    return;
++  }
++
+   invalidation::ProfileInvalidationProvider* invalidation_provider =
+-      GetInvalidationProvider(profile);
++      GetInvalidationProvider(profile_);
+   if (!invalidation_provider) {
+     VLOG(1) << "Invalidation provider does not exist.";
+     return;
+@@ -90,4 +122,15 @@ void UserFmRegistrationTokenUploader::OnProfileInitializationComplete(
+   }
+ }
+ 
++void UserFmRegistrationTokenUploader::OnStoreLoaded(CloudPolicyStore* store) {
++  MaybeStart(store);
++}
++
++void UserFmRegistrationTokenUploader::OnStoreError(CloudPolicyStore* store) {}
++
++void UserFmRegistrationTokenUploader::OnStoreDestruction(
++    CloudPolicyStore* store) {
++  store_observation_.Reset();
++}
++
+ }  // namespace policy
+diff --git a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h
+index 8fcf54b..30c8eec 100644
+--- a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h
++++ b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h
+@@ -11,6 +11,7 @@
+ #include "base/scoped_observation.h"
+ #include "chrome/browser/profiles/profile_observer.h"
+ #include "components/keyed_service/core/keyed_service.h"
++#include "components/policy/core/common/cloud/cloud_policy_store.h"
+ 
+ class Profile;
+ 
+@@ -22,7 +23,8 @@ class FmRegistrationTokenUploader;
+ // Uploads Firebase registration token to the backend server. Implemented as a
+ // KeyedService to allow profile-based lifetime management.
+ class UserFmRegistrationTokenUploader : public KeyedService,
+-                                        public ProfileObserver {
++                                        public ProfileObserver,
++                                        public CloudPolicyStore::Observer {
+  public:
+   // `profile` is profile associated with the invalidator. It is used to get
+   // a reference to the profile's invalidation service. Both the profile and
+@@ -43,10 +45,21 @@ class UserFmRegistrationTokenUploader : public KeyedService,
+   // ProfileObserver implementation:
+   void OnProfileInitializationComplete(Profile* profile) override;
+ 
++  // CloudPolicyStore::Observer implementation:
++  void OnStoreLoaded(CloudPolicyStore* store) override;
++  void OnStoreError(CloudPolicyStore* store) override;
++  void OnStoreDestruction(CloudPolicyStore* store) override;
++
+  private:
++  void MaybeStart(CloudPolicyStore* store);
++  void StartUploaders();
++
++  raw_ptr<Profile> profile_ = nullptr;
+   base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
+ 
+   raw_ptr<CloudPolicyManager> policy_manager_ = nullptr;
++  base::ScopedObservation<CloudPolicyStore, CloudPolicyStore::Observer>
++      store_observation_{this};
+ 
+   std::vector<std::unique_ptr<FmRegistrationTokenUploader>> uploaders_;
+ };

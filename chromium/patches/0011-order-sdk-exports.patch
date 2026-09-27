@@ -1,0 +1,82 @@
+diff --git a/chrome/app/framework.order b/chrome/app/framework.order
+--- a/chrome/app/framework.order
++++ b/chrome/app/framework.order
+@@ -29,5 +29,78 @@
+ # Entry point for the web app shortcut copier.
+ _ChromeWebAppShortcutCopierMain
+ 
++# Public Cobble embedding ABI. Keep ChromeMain last for symbolization.
++_CCSCancelQuit
++_CCSCookiesExport
++_CCSCookiesReplace
++_CCSContextOpen
++_CCSContextRelease
++_CCSContextSetIdentityResolver
++_CCSDefaultContext
++_CCSDevToolsSessionClose
++_CCSDevToolsSessionFocus
++_CCSDevToolsSessionIsClosed
++_CCSDevToolsSessionRelease
++_CCSDevToolsSessionSetVisible
++_CCSDevToolsSessionView
++_CCSDownloadCancel
++_CCSDownloadGetControlState
++_CCSDownloadRelease
++_CCSDownloadSetPaused
++_CCSDownloadSetDestination
++_CCSExtensionInstallUnpacked
++_CCSExtensionList
++_CCSExtensionObserve
++_CCSExtensionInstallResolve
++_CCSExtensionPerformAction
++_CCSExtensionRemove
++_CCSExtensionSetEnabled
++_CCSExtensionSetSiteAccess
++_CCSFileChooserResolve
++_CCSExternalProtocolResolve
++_CCSClientCertificateCancel
++_CCSClientCertificateSelect
++_CCSHTTPAuthCancel
++_CCSHTTPAuthResolve
++_CCSJavaScriptDialogResolve
++_CCSPageClose
++_CCSPageCaptureViewportPNG
++_CCSPageCreate
++_CCSPageCreateMHTMLArchive
++_CCSPageCopyConnectionDetailsJSON
++_CCSPageCurrentDOM
++_CCSPageFind
++_CCSPageFocus
++_CCSPageForceClose
++_CCSPageGetZoomFactor
++_CCSPageGoBack
++_CCSPageGoForward
++_CCSPageIsAudioMuted
++_CCSPageIsClosed
++_CCSPageStopMediaCapture
++_CCSPageLoadURL
++_CCSPageMoveToHost
++_CCSPageOpenDevTools
++_CCSPageOpenLocalFile
++_CCSPagePrint
++_CCSPageRelease
++_CCSPageReload
++_CCSPageReloadFromOrigin
++_CCSPageSetAudioMuted
++_CCSPageSetVisible
++_CCSPageSetZoomFactor
++_CCSPageStop
++_CCSPageView
++_CCSPrivateContext
++_CCSMediaPermissionResolve
++_CCSProfileDeletionPreflight
++_CCSRequestQuit
++_CCSSetClient
++_CCSScheduleProfileDeletion
++_CCSWebsiteDataClearCache
++_CCSWebsiteDataListSites
++_CCSWebsiteDataRemove
++_CCSWebsiteDataRemoveSite
++
+ # _ChromeMain must be listed last.  That's the whole point of this file.
+ _ChromeMain

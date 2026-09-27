@@ -1,0 +1,45 @@
+diff --git a/chrome/browser/app_controller_mac.mm b/chrome/browser/app_controller_mac.mm
+index 9166eed..fa01810 100644
+--- a/chrome/browser/app_controller_mac.mm
++++ b/chrome/browser/app_controller_mac.mm
+@@ -96,5 +96,6 @@
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
+ #include "chrome/browser/ui/extensions/application_launch.h"
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
+ #include "chrome/browser/ui/profiles/profile_picker.h"
+ #include "chrome/browser/ui/startup/first_run_service.h"
+ #include "chrome/browser/ui/startup/google_chrome_scheme_util.h"
+@@ -930,6 +931,10 @@
+ }
+ 
+ - (void)tryToTerminateApplication {
++  if (cobble_chromium::DeferAppQuit(_isPoweringOff)) {
++    return;
++  }
++
+   if ([self confirmQuitIfNeeded] == ConfirmQuitResultAborted) {
+     return;
+   }
+@@ -1848,7 +1853,11 @@
+ // To match standard mac behavior, we should open a new window if there are no
+ // browser windows.
+ - (BOOL)applicationShouldHandleReopen:(NSApplication*)theApplication
+                     hasVisibleWindows:(BOOL)hasVisibleWindows {
++  if (cobble_chromium::HandleAppReopen()) {
++    return NO;
++  }
++
+   // If the browser is currently trying to quit, don't do anything and return NO
+   // to prevent AppKit from doing anything.
+   if (browser_shutdown::IsTryingToQuit())
+@@ -2053,6 +2062,10 @@
+ }
+ 
+ - (void)application:(NSApplication*)sender openURLs:(NSArray<NSURL*>*)urls {
++  if (cobble_chromium::HandleAppOpenURLs((__bridge void*)urls)) {
++    return;
++  }
++
+   StartupTabs startupTabs;
+   for (NSURL* url in urls) {
+     // Handle the google-chrome:// scheme (and chromium://).

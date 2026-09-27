@@ -1,0 +1,75 @@
+diff --git a/components/download/internal/common/download_item_impl.cc b/components/download/internal/common/download_item_impl.cc
+index fc85b44..78d0555 100644
+--- a/components/download/internal/common/download_item_impl.cc
++++ b/components/download/internal/common/download_item_impl.cc
+@@ -482,6 +482,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadItemImplDelegate* delegate,
+       start_tick_(base::TimeTicks::Now()),
+       state_(INITIAL_INTERNAL),
+       delegate_(delegate),
++      original_request_was_get_(info.method == "GET"),
+       is_temporary_(!info.transient && !info.save_info->file_path.empty()),
+       transient_(info.transient),
+       require_safety_checks_(info.require_safety_checks),
+@@ -918,6 +919,10 @@ bool DownloadItemImpl::CanResume() const {
+   }
+ }
+ 
++bool DownloadItemImpl::WasCreatedFromGET() const {
++  return original_request_was_get_;
++}
++
+ bool DownloadItemImpl::IsDone() const {
+   return IsDownloadDone(GetURL(), GetState(), GetLastReason());
+ }
+diff --git a/components/download/public/common/download_item.cc b/components/download/public/common/download_item.cc
+index 540af6e..ef327c8 100644
+--- a/components/download/public/common/download_item.cc
++++ b/components/download/public/common/download_item.cc
+@@ -23,6 +23,10 @@ void DownloadItem::SetDownloadUrlForTesting(const GURL& url) {
+   NOTREACHED();
+ }
+ 
++bool DownloadItem::WasCreatedFromGET() const {
++  return false;
++}
++
+ void DownloadItem::SetURLLoaderFactory(
+     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {}
+ 
+diff --git a/components/download/public/common/download_item.h b/components/download/public/common/download_item.h
+index 526d9c9..f224d8b 100644
+--- a/components/download/public/common/download_item.h
++++ b/components/download/public/common/download_item.h
+@@ -271,6 +271,10 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
+   // user-interaction to resume.
+   virtual bool CanResume() const = 0;
+ 
++  // True only when the active item was created from a GET response. Historical,
++  // save-page, failed, and other implementations conservatively return false.
++  virtual bool WasCreatedFromGET() const;
++
+   // Returns true if the download is in a terminal state. This includes
+   // completed downloads, cancelled downloads, and interrupted downloads that
+   // can't be resumed.
+diff --git a/components/download/public/common/download_item_impl.h b/components/download/public/common/download_item_impl.h
+index 84084a6..88be0ad 100644
+--- a/components/download/public/common/download_item_impl.h
++++ b/components/download/public/common/download_item_impl.h
+@@ -282,6 +282,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
+   bool AllowMetered() const override;
+   bool IsTemporary() const override;
+   bool CanResume() const override;
++  bool WasCreatedFromGET() const override;
+   bool IsDone() const override;
+   int64_t GetBytesWasted() const override;
+   int32_t GetAutoResumeCount() const override;
+@@ -810,6 +811,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
+   // A flag for indicating if the downloaded file is externally removed.
+   bool file_externally_removed_ = false;
+ 
++  // Immutable method provenance for safe user-initiated restart.
++  bool original_request_was_get_ = false;
++
+   // True if the download was auto-opened. We set this rather than using
+   // an observer as it's frequently possible for the download to be auto opened
+   // before the observer is added.

@@ -1,0 +1,31 @@
+diff --git a/content/browser/renderer_host/navigation_request.cc b/content/browser/renderer_host/navigation_request.cc
+--- a/content/browser/renderer_host/navigation_request.cc
++++ b/content/browser/renderer_host/navigation_request.cc
+@@ -8809,6 +8809,12 @@
+ #else
+       CHECK(is_safe_to_delete_);
+       base::AutoReset<bool> resetter(&is_safe_to_delete_, false);
++#if BUILDFLAG(IS_MAC)
++      // Redirect headers are recomputed after this observer returns. Let a
++      // macOS embedder change the destination identity without reloading the
++      // original request, which could lose its method and body.
++      base::AutoReset<bool> ua_resetter(&ua_change_requires_reload_, false);
++#endif
+ #endif
+       GetDelegate()->DidRedirectNavigation(this);
+ #if BUILDFLAG(IS_ANDROID)
+@@ -10737,10 +10743,13 @@
+   if (is_synchronous_renderer_commit_)
+     return;
+ 
+-  // This code assumes it is only called from DidStartNavigation().
++  // Redirect callers run under the scoped no-reload guard above.
+   CHECK(!ua_change_requires_reload_);
+ 
+   commit_params_->is_overriding_user_agent = override_ua;
++  // Redirect headers are recomputed after DidRedirectNavigation().
++  if (state_ == WILL_REDIRECT_REQUEST)
++    return;
+   // The new document, created by this navigation, will be honoring the new
+   // value. It will be reflected into its NavigationEntry's when committing the
+   // new document at DidCommitNavigation time.

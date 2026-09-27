@@ -1,0 +1,19 @@
+diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
+--- a/content/browser/web_contents/web_contents_impl.cc
++++ b/content/browser/web_contents/web_contents_impl.cc
+@@ -4198,4 +4198,15 @@ void WebContentsImpl::SyncRendererPrefs() {
+   ExecutePageBroadcastMethodForAllPages([this](RenderViewHostImpl* rvh) {
+     rvh->SendRendererPreferencesToRenderer(GetRendererPrefs(rvh));
+   });
++#if BUILDFLAG(IS_MAC)
++  // A cached document can retain the previous page's user agent after a
++  // navigation changes it. Update it before a BFCache restore resumes it.
++  ForEachRenderViewHost(
++      kBackForwardCacheViews,
++      base::BindRepeating(
++          [](WebContentsImpl* contents, RenderViewHostImpl* rvh) {
++            rvh->SendRendererPreferencesToRenderer(contents->GetRendererPrefs(rvh));
++          },
++          base::Unretained(this)));
++#endif
+ }

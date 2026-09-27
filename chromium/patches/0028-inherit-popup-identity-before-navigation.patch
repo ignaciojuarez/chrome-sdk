@@ -1,0 +1,19 @@
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -3,4 +3,8 @@
+ 
+ #include "chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_identity.h"
++#endif
++
+ #include "base/check_deref.h"
+@@ -1172,3 +1176,6 @@ void BrowserWebContentsDelegate::WebContentsCreated(
+   // be removed.
+   CreateSessionServiceTabHelper(new_contents);
++#if BUILDFLAG(IS_MAC)
++  cobble_chromium::InheritIdentityPolicy(source_contents, new_contents);
++#endif
+ }

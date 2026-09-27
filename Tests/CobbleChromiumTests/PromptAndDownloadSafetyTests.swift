@@ -1,0 +1,208 @@
+import AppKit
+import Foundation
+import XCTest
+import CCobbleChromium
+@testable import CobbleChromium
+
+nonisolated(unsafe) private var nativeResolveCount = 0
+nonisolated(unsafe) private var lastFileChooserCount: Int?
+nonisolated(unsafe) private var lastFileChooserCancelled = false
+nonisolated(unsafe) private var lastDialogAccept: UInt8?
+nonisolated(unsafe) private var lastAuthSubmitted = false
+
+@MainActor final class PromptAndDownloadSafetyTests: XCTestCase {
+    override func setUp() {
+        nativeResolveCount = 0
+        lastFileChooserCount = nil
+        lastFileChooserCancelled = false
+        lastDialogAccept = nil
+        lastAuthSubmitted = false
+    }
+
+    func testDownloadTerminalStatusLatchesCallbacks() {
+        let runtime = ChromiumRuntime(api: CCSAPI())
+        let download = ChromiumDownload(
+            runtime: runtime, page: nil, handle: OpaquePointer(bitPattern: 1)!,
+            suggestedFilename: "file.bin")
+        var finishes = 0
+        var failures = 0
+        var progress = 0
+        download.onFinish = { finishes += 1 }
+        download.onFailure = { _ in failures += 1 }
+        download.onProgress = { _, _ in progress += 1 }
+
+        var state = CCSDownloadStateV1()
+        state.status = CCS_DOWNLOAD_IN_PROGRESS
+        state.received_bytes = 1
+        state.total_bytes = 2
+        download.update(state)
+        XCTAssertEqual(progress, 1)
+
+        state.status = CCS_DOWNLOAD_COMPLETE
+        download.update(state)
+        download.update(state)
+        state.status = CCS_DOWNLOAD_FAILED
+        download.update(state)
+        state.status = CCS_DOWNLOAD_IN_PROGRESS
+        download.update(state)
+        XCTAssertEqual(finishes, 1)
+        XCTAssertEqual(failures, 0)
+        XCTAssertEqual(progress, 1)
+    }
+
+    func testDownloadFailureLatchesAndRuntimeStopDoesNotSynthesizeFinish() {
+        let runtime = ChromiumRuntime(api: CCSAPI())
+        let download = ChromiumDownload(
+            runtime: runtime, page: nil, handle: OpaquePointer(bitPattern: 2)!,
+            suggestedFilename: "file.bin")
+        var finishes = 0
+        var failures = 0
+        download.onFinish = { finishes += 1 }
+        download.onFailure = { _ in failures += 1 }
+
+        var state = CCSDownloadStateV1()
+        state.status = CCS_DOWNLOAD_FAILED
+        download.update(state)
+        download.update(state)
+        XCTAssertEqual(failures, 1)
+        XCTAssertEqual(finishes, 0)
+
+        let stopped = ChromiumDownload(
+            runtime: runtime, page: nil, handle: OpaquePointer(bitPattern: 3)!,
+            suggestedFilename: "other.bin")
+        stopped.onFinish = { finishes += 1 }
+        stopped.onFailure = { _ in failures += 1 }
+        stopped.runtimeStopped()
+        state.status = CCS_DOWNLOAD_COMPLETE
+        stopped.update(state)
+        XCTAssertEqual(finishes, 0)
+        XCTAssertEqual(failures, 1)
+    }
+
+    func testJavaScriptPromptRejectsInteriorNUL() throws {
+        var api = CCSAPI()
+        api.javascript_dialog_resolve = { _, accept, _ in
+            nativeResolveCount += 1
+            lastDialogAccept = accept
+            return 1
+        }
+        let runtime = ChromiumRuntime(api: api)
+        let page = attachedPage(runtime)
+        var value = CCSJavaScriptDialogRequestV1()
+        value.kind = CCS_JAVASCRIPT_DIALOG_PROMPT
+        let request = try XCTUnwrap(ChromiumJavaScriptDialogRequest(
+            runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 4)!, value: value))
+        XCTAssertEqual(request.kind, .prompt)
+        XCTAssertFalse(request.accept(promptText: "ok\0bad"))
+        XCTAssertTrue(request.isPending)
+        XCTAssertEqual(nativeResolveCount, 0)
+        XCTAssertTrue(request.accept(promptText: "ok"))
+        XCTAssertEqual(nativeResolveCount, 1)
+        XCTAssertEqual(lastDialogAccept, 1)
+        XCTAssertFalse(request.isPending)
+    }
+
+    func testHTTPAuthRejectsInteriorNUL() {
+        var api = CCSAPI()
+        api.http_auth_resolve = { _, _, _ in
+            lastAuthSubmitted = true
+            nativeResolveCount += 1
+            return 1
+        }
+        let runtime = ChromiumRuntime(api: api)
+        let page = attachedPage(runtime)
+        let request = ChromiumHTTPAuthRequest(
+            runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 5)!,
+            value: CCSHTTPAuthRequestV1())
+        XCTAssertFalse(request.submit(username: "user\0name", password: "secret"))
+        XCTAssertFalse(request.submit(username: "user", password: "se\0cret"))
+        XCTAssertTrue(request.isPending)
+        XCTAssertFalse(lastAuthSubmitted)
+        XCTAssertTrue(request.submit(username: "user", password: "secret"))
+        XCTAssertEqual(nativeResolveCount, 1)
+        XCTAssertTrue(lastAuthSubmitted)
+    }
+
+    func testUnknownJavaScriptDialogKindRefusesInitialization() {
+        let runtime = ChromiumRuntime(api: CCSAPI())
+        let page = attachedPage(runtime)
+        var value = CCSJavaScriptDialogRequestV1()
+        value.kind = CCS_JAVASCRIPT_DIALOG_ALERT
+        XCTAssertEqual(
+            ChromiumJavaScriptDialogRequest(
+                runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 6)!,
+                value: value)?.kind,
+            .alert)
+
+        value.kind = CCSJavaScriptDialogKind(rawValue: numericCast(99))
+        XCTAssertNil(ChromiumJavaScriptDialogRequest(
+            runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 7)!, value: value))
+    }
+
+    func testUnknownFileChooserModeRefusesInitialization() {
+        let runtime = ChromiumRuntime(api: CCSAPI())
+        let page = attachedPage(runtime)
+        var value = CCSFileChooserRequestV1()
+        value.mode = CCS_FILE_CHOOSER_OPEN
+        XCTAssertEqual(
+            ChromiumFileChooserRequest(
+                runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 8)!,
+                value: value)?.mode,
+            .open)
+
+        value.mode = CCSFileChooserMode(rawValue: numericCast(99))
+        XCTAssertNil(ChromiumFileChooserRequest(
+            runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 9)!, value: value))
+    }
+
+    func testFileChooserSelectValidatesModeCountUTF8AndEmptyCancel() throws {
+        var api = CCSAPI()
+        api.file_chooser_resolve = { _, paths, count in
+            nativeResolveCount += 1
+            lastFileChooserCount = Int(count)
+            lastFileChooserCancelled = paths == nil || count == 0
+            return 1
+        }
+        let runtime = ChromiumRuntime(api: api)
+        let page = attachedPage(runtime)
+        var value = CCSFileChooserRequestV1()
+        value.mode = CCS_FILE_CHOOSER_OPEN
+        let open = try XCTUnwrap(ChromiumFileChooserRequest(
+            runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 10)!, value: value))
+        let file = URL(fileURLWithPath: "/tmp/one.txt")
+        let other = URL(fileURLWithPath: "/tmp/two.txt")
+        XCTAssertFalse(open.select([file, other]))
+        XCTAssertEqual(nativeResolveCount, 0)
+        XCTAssertTrue(open.isPending)
+        XCTAssertTrue(open.select([]))
+        XCTAssertEqual(nativeResolveCount, 1)
+        XCTAssertTrue(lastFileChooserCancelled)
+        XCTAssertFalse(open.isPending)
+
+        value.mode = CCS_FILE_CHOOSER_OPEN_MULTIPLE
+        let multiple = try XCTUnwrap(ChromiumFileChooserRequest(
+            runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 11)!, value: value))
+        XCTAssertTrue(multiple.select([file, other]))
+        XCTAssertEqual(lastFileChooserCount, 2)
+        XCTAssertFalse(lastFileChooserCancelled)
+
+        value.mode = CCS_FILE_CHOOSER_SAVE
+        let save = try XCTUnwrap(ChromiumFileChooserRequest(
+            runtime: runtime, page: page, handle: OpaquePointer(bitPattern: 12)!, value: value))
+        let nulPath = URL(fileURLWithPath: "/tmp/nul\u{0}name.txt")
+        if nulPath.path.utf8.contains(0) {
+            XCTAssertFalse(save.select([nulPath]))
+        }
+        XCTAssertFalse(save.select([URL(string: "https://example.test/file")!]))
+        XCTAssertTrue(save.isPending)
+    }
+
+    private func attachedPage(_ runtime: ChromiumRuntime) -> ChromiumPage {
+        let handle = OpaquePointer(bitPattern: 0x51)!
+        let context = ChromiumContext(
+            runtime: runtime, handle: handle, profileKey: "fixture", privateWindowKey: nil)
+        return ChromiumPage(
+            runtime: runtime, context: context, handle: handle,
+            hostWindowID: UUID(), nativeView: NSView())
+    }
+}

@@ -1,0 +1,92 @@
+diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
+index 27be7a3..165a66f 100644
+--- a/chrome/browser/download/chrome_download_manager_delegate.cc
++++ b/chrome/browser/download/chrome_download_manager_delegate.cc
+@@ -31,6 +31,10 @@
+ #include "base/task/thread_pool.h"
+ #include "base/time/time.h"
+ #include "build/build_config.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#include "chrome/browser/ui/cobble/cobble_downloads.h"
++#endif
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/download/download_core_service.h"
+ #include "chrome/browser/download/download_core_service_factory.h"
+@@ -647,6 +651,11 @@ ChromeDownloadManagerDelegate::~ChromeDownloadManagerDelegate() {
+ }
+ 
+ bool ChromeDownloadManagerDelegate::SupportsHistoryLoading() {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+   return HistoryServiceFactory::GetForProfile(
+              profile_, ServiceAccessType::EXPLICIT_ACCESS) != nullptr;
+ }
+@@ -746,6 +755,12 @@ void ChromeDownloadManagerDelegate::SetNextId(uint32_t next_id) {
+ void ChromeDownloadManagerDelegate::GetNextId(
+     content::DownloadIdCallback callback) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    std::move(callback).Run(download::DownloadItem::kInvalidId);
++    return;
++  }
++#endif
+   if (profile_->IsOffTheRecord()) {
+     profile_->GetOriginalProfile()->GetDownloadManager()->GetNextId(
+         std::move(callback));
+@@ -1510,6 +1525,12 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
+     DownloadTargetDeterminerDelegate::ConfirmationCallback callback) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   DCHECK(!download->IsTransient());
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::RequestDownloadDestination(
++          download, suggested_path, &callback)) {
++    return;
++  }
++#endif
+ 
+ // TODO(xingliu): We should abstract a DownloadFilePicker interface and make all
+ // platform use it.
+diff --git a/chrome/browser/download/download_core_service_impl.cc b/chrome/browser/download/download_core_service_impl.cc
+index 9d63759..9b8a91a 100644
+--- a/chrome/browser/download/download_core_service_impl.cc
++++ b/chrome/browser/download/download_core_service_impl.cc
+@@ -9,6 +9,9 @@
+ #include "base/feature_list.h"
+ #include "base/functional/callback.h"
+ #include "build/build_config.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/download/chrome_download_manager_delegate.h"
+ #include "chrome/browser/download/download_core_service.h"
+@@ -68,7 +71,11 @@ DownloadCoreServiceImpl::GetDownloadManagerDelegate() {
+                                                                   manager);
+ #endif
+ 
+-  if (!profile_->IsOffTheRecord()) {
++  bool supports_download_history = !profile_->IsOffTheRecord();
++#if BUILDFLAG(IS_MAC)
++  supports_download_history &= !cobble_chromium::IsEnabled();
++#endif
++  if (supports_download_history) {
+     history::HistoryService* history = HistoryServiceFactory::GetForProfile(
+         profile_, ServiceAccessType::EXPLICIT_ACCESS);
+     history->GetNextDownloadId(
+@@ -101,6 +108,11 @@ void DownloadCoreServiceImpl::InitializeHistory() {
+   if (download_history_ || profile_->IsOffTheRecord()) {
+     return;
+   }
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return;
++  }
++#endif
+   if (!download_manager_created_) {
+     GetDownloadManagerDelegate();
+   }

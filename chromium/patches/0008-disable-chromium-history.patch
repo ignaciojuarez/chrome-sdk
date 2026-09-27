@@ -1,0 +1,32 @@
+diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/extensions/api/_api_features.json
+--- a/chrome/common/extensions/api/_api_features.json
++++ b/chrome/common/extensions/api/_api_features.json
+@@ -645,6 +645,7 @@
+     "contexts": ["privileged_extension"]
+   },
+   "history": {
++    "platforms": ["chromeos", "linux", "win"],
+     "dependencies": ["permission:history"],
+     "contexts": ["privileged_extension"]
+   },
+diff --git a/chrome/browser/history/history_tab_helper.cc b/chrome/browser/history/history_tab_helper.cc
+--- a/chrome/browser/history/history_tab_helper.cc
++++ b/chrome/browser/history/history_tab_helper.cc
+@@ -625,6 +625,9 @@ void HistoryTabHelper::TitleWasSet(NavigationEntry* entry) {
+ }
+ 
+ history::HistoryService* HistoryTabHelper::GetHistoryService() {
++#if BUILDFLAG(IS_MAC)
++  return nullptr;
++#else
+   Profile* profile =
+       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+   if (profile->IsOffTheRecord()) {
+@@ -633,6 +636,7 @@ history::HistoryService* HistoryTabHelper::GetHistoryService() {
+ 
+   return HistoryServiceFactory::GetForProfile(
+       profile, ServiceAccessType::IMPLICIT_ACCESS);
++#endif
+ }
+ 
+ void HistoryTabHelper::WebContentsDestroyed() {

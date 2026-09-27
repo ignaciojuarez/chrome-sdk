@@ -1,0 +1,305 @@
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index bef01e2..d9790e0 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -418,6 +418,7 @@
+ #include "services/network/public/cpp/features.h"
+ #include "services/network/public/cpp/is_potentially_trustworthy.h"
+ #include "services/network/public/cpp/network_switches.h"
++#include "services/network/public/cpp/not_implemented_url_loader_factory.h"
+ #include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
+ #include "services/network/public/cpp/permissions_policy/permissions_policy_features.h"
+ #include "services/network/public/cpp/resource_request.h"
+@@ -574,6 +575,7 @@
+ #include "chrome/browser/ui/browser.h"
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/ui/cobble/cobble_chromium.h"
++#include "chrome/browser/ui/cobble/cobble_local_file.h"
+ #include "chrome/browser/ui/cobble/cobble_prompts.h"
+ #endif
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+@@ -5624,6 +5626,7 @@ void ChromeContentBrowserClient::CreateThrottlesForNavigation(
+     content::NavigationThrottleRegistry& registry) {
+   CreateAndAddChromeThrottlesForNavigation(registry);
+ #if BUILDFLAG(IS_MAC)
++  cobble_chromium::AddLocalFileNavigationThrottle(registry);
+   content::NavigationHandle& handle = registry.GetNavigationHandle();
+   if (cobble_chromium::PageForWebContents(handle.GetWebContents()) &&
+       handle.IsPost() && handle.GetReloadType() != content::ReloadType::NONE) {
+@@ -6167,6 +6170,13 @@ ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory(
+       content::WebContents::FromFrameTreeNodeId(frame_tree_node_id);
+   content::BrowserContext* browser_context = web_contents->GetBrowserContext();
+ 
++#if BUILDFLAG(IS_MAC)
++  if (auto factory = cobble_chromium::CreateLocalFileNavigationFactory(
++          scheme, frame_tree_node_id)) {
++    return factory;
++  }
++#endif
++
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+   if (scheme == extensions::kExtensionScheme) {
+     if (!ChromeContentBrowserClientExtensionsPart::
+@@ -6269,6 +6279,13 @@ void ChromeContentBrowserClient::
+   DCHECK(browser_context);
+   DCHECK(factories);
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::ShouldDenyLocalFileWorkerFactories(browser_context)) {
++    factories->insert_or_assign(
++        url::kFileScheme, network::NotImplementedURLLoaderFactory::Create());
++  }
++#endif
++
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
+   if (content::AreIsolatedWebAppsEnabled(browser_context) &&
+@@ -6315,6 +6332,13 @@ void ChromeContentBrowserClient::
+   DCHECK(browser_context);
+   DCHECK(factories);
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::ShouldDenyLocalFileWorkerFactories(browser_context)) {
++    factories->insert_or_assign(
++        url::kFileScheme, network::NotImplementedURLLoaderFactory::Create());
++  }
++#endif
++
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
+   if (content::AreIsolatedWebAppsEnabled(browser_context) &&
+@@ -6570,6 +6594,13 @@ void ChromeContentBrowserClient::
+         int render_frame_id,
+         const std::optional<url::Origin>& request_initiator_origin,
+         NonNetworkURLLoaderFactoryMap* factories) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::ShouldDenyLocalFileSubresourceFactories(
++          render_process_id, render_frame_id)) {
++    factories->insert_or_assign(
++        url::kFileScheme, network::NotImplementedURLLoaderFactory::Create());
++  }
++#endif
+ #if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(ENABLE_EXTENSIONS_CORE) || \
+     !BUILDFLAG(IS_ANDROID)
+   content::RenderFrameHost* frame_host =
+diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
+index d0ff431..0fb5b75 100644
+--- a/chrome/browser/download/chrome_download_manager_delegate.cc
++++ b/chrome/browser/download/chrome_download_manager_delegate.cc
+@@ -34,6 +34,7 @@
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/ui/cobble/cobble_chromium.h"
+ #include "chrome/browser/ui/cobble/cobble_downloads.h"
++#include "chrome/browser/ui/cobble/cobble_local_file.h"
+ #endif
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/download/download_core_service.h"
+@@ -2417,6 +2418,12 @@ void ChromeDownloadManagerDelegate::CheckDownloadAllowed(
+   }
+ #endif
+   content::WebContents* web_contents = web_contents_getter.Run();
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::ShouldDenyLocalFileDownload(web_contents, url)) {
++    OnCheckDownloadAllowedFailed(std::move(check_download_allowed_cb));
++    return;
++  }
++#endif
+   if (!web_contents) {
+     OnCheckDownloadAllowedFailed(std::move(check_download_allowed_cb));
+     return;
+diff --git a/chrome/browser/renderer_host/chrome_navigation_ui_data.cc b/chrome/browser/renderer_host/chrome_navigation_ui_data.cc
+index 8337d6c..5432c18 100644
+--- a/chrome/browser/renderer_host/chrome_navigation_ui_data.cc
++++ b/chrome/browser/renderer_host/chrome_navigation_ui_data.cc
+@@ -112,6 +112,7 @@ std::unique_ptr<content::NavigationUIData> ChromeNavigationUIData::Clone() {
+ 
+   copy->is_no_state_prefetching_ = is_no_state_prefetching_;
+   copy->bookmark_id_ = bookmark_id_;
++  copy->cobble_local_file_token_ = cobble_local_file_token_;
+ #if BUILDFLAG(IS_ANDROID)
+   copy->twa_launch_token_ = twa_launch_token_;
+ #endif
+diff --git a/chrome/browser/renderer_host/chrome_navigation_ui_data.h b/chrome/browser/renderer_host/chrome_navigation_ui_data.h
+index b2f962a..cf95e53 100644
+--- a/chrome/browser/renderer_host/chrome_navigation_ui_data.h
++++ b/chrome/browser/renderer_host/chrome_navigation_ui_data.h
+@@ -92,6 +92,13 @@ class ChromeNavigationUIData : public content::NavigationUIData {
+   }
+ #endif
+ 
++  std::optional<uint64_t> cobble_local_file_token() const {
++    return cobble_local_file_token_;
++  }
++  void set_cobble_local_file_token(std::optional<uint64_t> token) {
++    cobble_local_file_token_ = token;
++  }
++
+   actor::TaskId actor_task_id() const { return actor_task_id_; }
+ 
+   bool navigation_initiated_from_sync() {
+@@ -132,6 +139,9 @@ class ChromeNavigationUIData : public content::NavigationUIData {
+   // Id of the bookmark which started this navigation.
+   std::optional<int64_t> bookmark_id_;
+ 
++  // Identifies a browser-owned exact local-file navigation.
++  std::optional<uint64_t> cobble_local_file_token_;
++
+ #if BUILDFLAG(IS_ANDROID)
+   // Unique token generated in Java to identify a TWA launch associated with
+   // this navigation.
+diff --git a/content/browser/loader/file_url_loader_factory.cc b/content/browser/loader/file_url_loader_factory.cc
+index efe07be..0fec75f 100644
+--- a/content/browser/loader/file_url_loader_factory.cc
++++ b/content/browser/loader/file_url_loader_factory.cc
+@@ -393,6 +393,7 @@ class FileURLLoader : public network::mojom::URLLoader {
+       LinkFollowingPolicy link_following_policy,
+       std::unique_ptr<FileURLLoaderObserver> observer,
+       scoped_refptr<net::HttpResponseHeaders> extra_response_headers,
++      base::File preopened_file,
+       file_access::ScopedFileAccess file_access) {
+     // Owns itself. Will live as long as its URLLoader and URLLoaderClient
+     // bindings are alive - essentially until either the client gives up or all
+@@ -402,7 +403,8 @@ class FileURLLoader : public network::mojom::URLLoader {
+         profile_path, request, response_type, std::move(loader),
+         std::move(client_remote), directory_loading_policy, file_access_policy,
+         link_following_policy, std::move(observer),
+-        std::move(extra_response_headers), std::move(file_access));
++        std::move(extra_response_headers), std::move(preopened_file),
++        std::move(file_access));
+   }
+ 
+   FileURLLoader(const FileURLLoader&) = delete;
+@@ -429,7 +431,7 @@ class FileURLLoader : public network::mojom::URLLoader {
+           redirect_data->file_access_policy,
+           redirect_data->link_following_policy,
+           std::move(redirect_data->observer),
+-          std::move(redirect_data->extra_response_headers),
++          std::move(redirect_data->extra_response_headers), base::File(),
+           std::move(*redirect_data->file_access.release()));
+     }
+     MaybeDeleteSelf();
+@@ -470,6 +472,7 @@ class FileURLLoader : public network::mojom::URLLoader {
+              LinkFollowingPolicy link_following_policy,
+              std::unique_ptr<FileURLLoaderObserver> observer,
+              scoped_refptr<net::HttpResponseHeaders> extra_response_headers,
++             base::File preopened_file,
+              file_access::ScopedFileAccess file_access) {
+     // ClusterFuzz depends on the following VLOG to get resource dependencies.
+     // See crbug.com/715656.
+@@ -498,7 +501,8 @@ class FileURLLoader : public network::mojom::URLLoader {
+     }
+ 
+     base::File::Info info;
+-    if (!base::GetFileInfo(path, &info)) {
++    if (preopened_file.IsValid() ? !preopened_file.GetInfo(&info)
++                                 : !base::GetFileInfo(path, &info)) {
+       OnClientComplete(net::ERR_FILE_NOT_FOUND, std::move(observer));
+       return;
+     }
+@@ -541,7 +545,9 @@ class FileURLLoader : public network::mojom::URLLoader {
+     }
+ 
+     // Full file path with all symbolic links resolved.
+-    base::FilePath full_path = base::MakeAbsoluteFilePath(path);
++    base::FilePath full_path = preopened_file.IsValid()
++                                   ? path
++                                   : base::MakeAbsoluteFilePath(path);
+     if (file_access_policy == FileAccessPolicy::kRestricted &&
+         !GetContentClient()->browser()->IsFileAccessAllowed(path, full_path,
+                                                             profile_path)) {
+@@ -619,9 +625,13 @@ class FileURLLoader : public network::mojom::URLLoader {
+       observer->OnStart();
+     }
+ 
+-    auto file_data_source = std::make_unique<mojo::FileDataSource>(
+-        base::File(path, base::File::FLAG_OPEN | base::File::FLAG_READ |
+-                             base::File::FLAG_WIN_SHARE_DELETE));
++    base::File file = preopened_file.IsValid()
++                          ? std::move(preopened_file)
++                          : base::File(path, base::File::FLAG_OPEN |
++                                                base::File::FLAG_READ |
++                                                base::File::FLAG_WIN_SHARE_DELETE);
++    auto file_data_source =
++        std::make_unique<mojo::FileDataSource>(std::move(file));
+ 
+     std::vector<char> initial_read_buffer(net::kMaxBytesToSniff);
+     auto read_result =
+@@ -933,7 +943,7 @@ void FileURLLoaderFactory::CreateLoaderAndStartInternal(
+                        FileAccessPolicy::kRestricted,
+                        LinkFollowingPolicy::kFollow,
+                        std::unique_ptr<FileURLLoaderObserver>(),
+-                       nullptr /* extra_response_headers */));
++                       nullptr /* extra_response_headers */, base::File()));
+     if (auto* file_access = file_access::ScopedFileAccessDelegate::Get()) {
+       // If the request has an initiator use it as source for the dlp check.
+       // Requests with no initiator e.g. user actions the request should be
+@@ -993,7 +1003,7 @@ void CreateFileURLLoaderBypassingSecurityChecks(
+                            : DirectoryLoadingPolicy::kFail,
+                        FileAccessPolicy::kUnrestricted,
+                        LinkFollowingPolicy::kDoNotFollow, std::move(observer),
+-                       std::move(extra_response_headers)));
++                       std::move(extra_response_headers), base::File()));
+     file_access::ScopedFileAccessDelegate::RequestFilesAccessForSystemIO(
+         {path}, std::move(create_and_start_cb));
+   } else {
+@@ -1003,6 +1013,32 @@ void CreateFileURLLoaderBypassingSecurityChecks(
+   }
+ }
+ 
++void CreateFileURLLoaderFromFile(
++    const network::ResourceRequest& request,
++    base::File file,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    std::unique_ptr<FileURLLoaderObserver> observer) {
++  if (!file.IsValid() || !request.url.SchemeIsFile()) {
++    mojo::Remote<network::mojom::URLLoaderClient>(std::move(client))
++        ->OnComplete(network::URLLoaderCompletionStatus(net::ERR_INVALID_ARGUMENT));
++    return;
++  }
++  auto task_runner = base::ThreadPool::CreateSequencedTaskRunner(
++      {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
++       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
++  task_runner->PostTask(
++      FROM_HERE,
++      base::BindOnce(&FileURLLoader::CreateAndStart, base::FilePath(), request,
++                     network::mojom::FetchResponseType::kBasic,
++                     std::move(loader), std::move(client),
++                     DirectoryLoadingPolicy::kFail,
++                     FileAccessPolicy::kUnrestricted,
++                     LinkFollowingPolicy::kDoNotFollow, std::move(observer),
++                     nullptr, std::move(file),
++                     file_access::ScopedFileAccess::Allowed()));
++}
++
+ mojo::PendingRemote<network::mojom::URLLoaderFactory>
+ CreateFileURLLoaderFactory(
+     const base::FilePath& profile_path,
+diff --git a/content/public/browser/file_url_loader.h b/content/public/browser/file_url_loader.h
+index 1791452..f23d7a9 100644
+--- a/content/public/browser/file_url_loader.h
++++ b/content/public/browser/file_url_loader.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ 
++#include "base/files/file.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "content/common/content_export.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+@@ -65,6 +66,15 @@ CONTENT_EXPORT void CreateFileURLLoaderBypassingSecurityChecks(
+     bool allow_directory_listing,
+     scoped_refptr<net::HttpResponseHeaders> extra_response_headers = nullptr);
+ 
++// Creates a file URL loader which consumes an already-open regular file. The
++// request URL is retained for response metadata; its path is never reopened.
++CONTENT_EXPORT void CreateFileURLLoaderFromFile(
++    const network::ResourceRequest& request,
++    base::File file,
++    mojo::PendingReceiver<network::mojom::URLLoader> loader,
++    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
++    std::unique_ptr<FileURLLoaderObserver> observer);
++
+ // Helper to create a FileURLLoaderFactory. This exposes the ability to load
+ // file:// URLs through SimpleURLLoader to non-content classes.
+ //

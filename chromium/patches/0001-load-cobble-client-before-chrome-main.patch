@@ -1,0 +1,43 @@
+diff --git a/chrome/app/chrome_exe_main_mac.cc b/chrome/app/chrome_exe_main_mac.cc
+index 8c027af..a14ab89 100644
+--- a/chrome/app/chrome_exe_main_mac.cc
++++ b/chrome/app/chrome_exe_main_mac.cc
+@@ -214,6 +214,38 @@ __attribute__((visibility("default"))) int main(int argc, char* argv[]) {
+   if (!chrome_main) {
+     FatalError("dlsym %s: %s.", entry_symbol, dlerror());
+   }
++#if !defined(HELPER_EXECUTABLE)
++  // Preserve Chromium's real launcher and its early allocator setup. A host
++  // may add this dylib to the outer app only; renderer/GPU/network helpers
++  // continue directly into ChromeMain after their normal Seatbelt bootstrap.
++  static constexpr char client_rel_path[] =
++      "../Frameworks/CobbleChromiumClient.dylib";
++  const size_t client_path_size =
++      parent_dir_len + strlen(client_rel_path) + 2;
++  std::unique_ptr<char[]> client_path(new char[client_path_size]);
++  UNSAFE_TODO(snprintf(client_path.get(), client_path_size, "%s/%s",
++                       parent_dir, client_rel_path));
++  if (access(client_path.get(), R_OK) == 0) {
++    void* client = dlopen(client_path.get(), RTLD_NOW | RTLD_LOCAL);
++    if (!client) {
++      FatalError("dlopen %s: %s.", client_path.get(), dlerror());
++    }
++    using CCSClientMainPtr = int (*)(void* chromium_framework_handle);
++    const CCSClientMainPtr client_main =
++        reinterpret_cast<CCSClientMainPtr>(dlsym(client, "CCSClientMain"));
++    if (!client_main) {
++      FatalError("dlsym CCSClientMain: %s.", dlerror());
++    }
++    const int client_rv = client_main(library);
++    if (client_rv != 0) {
++      FatalError("CCSClientMain failed: %d.", client_rv);
++    }
++  } else {
++    FatalError("This SDK runtime requires an assembled native client before "
++               "launching.");
++  }
++#endif
++
+   rv = chrome_main(argc, const_cast<const char**>(argv));
+ 
+   // exit, don't return from main, to avoid the apparent removal of main from

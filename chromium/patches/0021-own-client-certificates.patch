@@ -1,0 +1,750 @@
+diff --git a/content/public/browser/content_browser_client.h b/content/public/browser/content_browser_client.h
+--- a/content/public/browser/content_browser_client.h
++++ b/content/public/browser/content_browser_client.h
+@@ -243,24 +243,25 @@
+ class DevToolsManagerDelegate;
+ class BtmService;
+ class DirectSocketsDelegate;
+ class FeatureObserverClient;
+ class FontAccessDelegate;
+ class GuestPageHolder;
+ class HidDelegate;
+ class IdentityRequestDialogController;
+ class NativeIdpFetcher;
+ class LoginDelegate;
+ class MediaObserver;
+ class NavigationHandle;
++class NavigationOrDocumentHandle;
+ class NavigationThrottle;
+ class NavigationThrottleRegistry;
+ class NavigationUIData;
+ class PrefetchServiceDelegate;
+ class PrerenderWebContentsDelegate;
+ class PresentationObserver;
+ class ProcessSelectionUserData;
+ class ReceiverPresentationServiceDelegate;
+ class RenderFrameHost;
+ class RenderProcessHost;
+ class ResponsivenessCalculatorDelegate;
+ class SecurityPrincipal;
+@@ -1225,24 +1226,35 @@
+   // without an associated WebContents, like a service worker. In this case, UI
+   // should not be shown, but a certificate may still be provided (such as when
+   // the certificate is auto-selected by policy). `process_id` corresponds to
+   // the ID of the renderer process initiating the request.
+   virtual base::OnceClosure SelectClientCertificate(
+       BrowserContext* browser_context,
+       int process_id,
+       WebContents* web_contents,
+       net::SSLCertRequestInfo* cert_request_info,
+       net::ClientCertIdentityList client_certs,
+       std::unique_ptr<ClientCertificateDelegate> delegate);
+ 
++  // Like SelectClientCertificate, with the exact navigation/document that
++  // originated the request. The default preserves existing embedder behavior.
++  virtual base::OnceClosure SelectClientCertificateWithContext(
++      NavigationOrDocumentHandle* navigation_or_document,
++      BrowserContext* browser_context,
++      int process_id,
++      WebContents* web_contents,
++      net::SSLCertRequestInfo* cert_request_info,
++      net::ClientCertIdentityList client_certs,
++      std::unique_ptr<ClientCertificateDelegate> delegate);
++
+   // Returns a class to get notifications about media event. The embedder can
+   // return nullptr if they're not interested.
+   virtual MediaObserver* GetMediaObserver();
+ 
+   // Returns a class to observe usage of features. The embedder can return
+   // nullptr if they're not interested. The returned FeatureObserverClient must
+   // stay alive until BrowserMainParts::PostDestroyThreads() is called and
+   // threads are destroyed.  Its interface will always be called from the same
+   // sequence.
+   virtual FeatureObserverClient* GetFeatureObserverClient();
+ 
+   // Returns true if the given render frame host is allowed to bypass the popup
+diff --git a/content/public/browser/content_browser_client.cc b/content/public/browser/content_browser_client.cc
+--- a/content/public/browser/content_browser_client.cc
++++ b/content/public/browser/content_browser_client.cc
+@@ -732,24 +732,37 @@
+ }
+ 
+ base::OnceClosure ContentBrowserClient::SelectClientCertificate(
+     BrowserContext* browser_context,
+     int process_id,
+     WebContents* web_contents,
+     net::SSLCertRequestInfo* cert_request_info,
+     net::ClientCertIdentityList client_certs,
+     std::unique_ptr<ClientCertificateDelegate> delegate) {
+   return base::OnceClosure();
+ }
+ 
++base::OnceClosure ContentBrowserClient::SelectClientCertificateWithContext(
++    NavigationOrDocumentHandle* navigation_or_document,
++    BrowserContext* browser_context,
++    int process_id,
++    WebContents* web_contents,
++    net::SSLCertRequestInfo* cert_request_info,
++    net::ClientCertIdentityList client_certs,
++    std::unique_ptr<ClientCertificateDelegate> delegate) {
++  return SelectClientCertificate(browser_context, process_id, web_contents,
++                                 cert_request_info, std::move(client_certs),
++                                 std::move(delegate));
++}
++
+ std::unique_ptr<device::LocationProvider>
+ ContentBrowserClient::OverrideSystemLocationProvider() {
+   return nullptr;
+ }
+ 
+ scoped_refptr<network::SharedURLLoaderFactory>
+ ContentBrowserClient::GetSystemSharedURLLoaderFactory() {
+   return nullptr;
+ }
+ 
+ network::mojom::NetworkContext*
+ ContentBrowserClient::GetSystemNetworkContext() {
+diff --git a/content/browser/ssl/ssl_client_auth_handler.h b/content/browser/ssl/ssl_client_auth_handler.h
+--- a/content/browser/ssl/ssl_client_auth_handler.h
++++ b/content/browser/ssl/ssl_client_auth_handler.h
+@@ -14,24 +14,26 @@
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/web_contents.h"
+ #include "net/ssl/client_cert_identity.h"
+ #include "net/ssl/ssl_cert_request_info.h"
+ 
+ namespace net {
+ class ClientCertStore;
+ class SSLPrivateKey;
+ class X509Certificate;
+ }  // namespace net
+ 
+ namespace content {
++
++class NavigationOrDocumentHandle;
+ 
+ // This class handles the approval and selection of a certificate for SSL client
+ // authentication by the user. Should only be used on the UI thread. If the
+ // SSLClientAuthHandler is destroyed before the certificate is selected, the
+ // selection is canceled and the delegate never called.
+ class SSLClientAuthHandler {
+  public:
+   // Delegate interface for SSLClientAuthHandler. Method implementations may
+   // delete the handler when called.
+   class Delegate {
+    public:
+     Delegate() {}
+@@ -55,24 +57,26 @@
+   // does not outlive `delegate`.
+   // `browser_context` is always set, but may become invalid if the caller is
+   // destroyed. `web_contents` may be null for cases where the calling context
+   // is not associated with a document, such as service workers. If
+   // `web_contents` is not null, it is guaranteed to be associated with the same
+   // BrowserContext as `browser_context`.
+   // `process_id` corresponds to the ID of the renderer process initiating the
+   // request.
+   SSLClientAuthHandler(std::unique_ptr<net::ClientCertStore> client_cert_store,
+                        base::WeakPtr<BrowserContext> browser_context,
+                        int process_id,
+                        base::WeakPtr<WebContents> web_contents,
++                       scoped_refptr<NavigationOrDocumentHandle>
++                           navigation_or_document,
+                        net::SSLCertRequestInfo* cert_request_info,
+                        Delegate* delegate);
+ 
+   SSLClientAuthHandler(const SSLClientAuthHandler&) = delete;
+   SSLClientAuthHandler& operator=(const SSLClientAuthHandler&) = delete;
+ 
+   ~SSLClientAuthHandler();
+ 
+   // Selects a certificate and resumes the URL request with that certificate.
+   void SelectCertificate();
+ 
+  private:
+@@ -81,24 +85,25 @@
+   // Called when |core_| is done retrieving the cert list.
+   void DidGetClientCerts(net::ClientCertIdentityList client_certs);
+ 
+   void DidGetClientCertsOnPostTask(net::ClientCertIdentityList client_certs);
+ 
+   // A callback that may be set by the UI implementation. If set, the callback
+   // will cancel the dialog corresponding to this certificate request.
+   base::OnceClosure cancellation_callback_;
+ 
+   base::WeakPtr<BrowserContext> browser_context_;
+   const int process_id_;
+   base::WeakPtr<WebContents> web_contents_;
++  scoped_refptr<NavigationOrDocumentHandle> navigation_or_document_;
+ 
+   // The certs to choose from.
+   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
+ 
+   // The ClientCertStore to retrieve the certs from.
+   std::unique_ptr<net::ClientCertStore> client_cert_store_;
+ 
+   // The delegate to call back with the result.
+   raw_ptr<Delegate> delegate_;
+ 
+   base::WeakPtrFactory<SSLClientAuthHandler> weak_factory_{this};
+ };
+diff --git a/content/browser/ssl/ssl_client_auth_handler.cc b/content/browser/ssl/ssl_client_auth_handler.cc
+--- a/content/browser/ssl/ssl_client_auth_handler.cc
++++ b/content/browser/ssl/ssl_client_auth_handler.cc
+@@ -2,24 +2,25 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+ #include "content/browser/ssl/ssl_client_auth_handler.h"
+ 
+ #include <utility>
+ 
+ #include "base/check_op.h"
+ #include "base/functional/bind.h"
+ #include "content/public/browser/browser_task_traits.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/client_certificate_delegate.h"
++#include "content/browser/navigation_or_document_handle.h"
+ #include "content/public/browser/content_browser_client.h"
+ #include "content/public/common/content_client.h"
+ #include "net/ssl/client_cert_store.h"
+ #include "net/ssl/ssl_private_key.h"
+ 
+ namespace content {
+ 
+ class SSLClientAuthHandler::ClientCertificateDelegateImpl
+     : public ClientCertificateDelegate {
+  public:
+   explicit ClientCertificateDelegateImpl(
+       base::WeakPtr<SSLClientAuthHandler> handler)
+@@ -47,29 +48,31 @@
+   }
+ 
+  private:
+   base::WeakPtr<SSLClientAuthHandler> handler_;
+   bool continue_called_ = false;
+ };
+ 
+ SSLClientAuthHandler::SSLClientAuthHandler(
+     std::unique_ptr<net::ClientCertStore> client_cert_store,
+     base::WeakPtr<BrowserContext> browser_context,
+     int process_id,
+     base::WeakPtr<WebContents> web_contents,
++    scoped_refptr<NavigationOrDocumentHandle> navigation_or_document,
+     net::SSLCertRequestInfo* cert_request_info,
+     Delegate* delegate)
+     : browser_context_(browser_context),
+       process_id_(process_id),
+       web_contents_(web_contents),
++      navigation_or_document_(std::move(navigation_or_document)),
+       cert_request_info_(cert_request_info),
+       client_cert_store_(std::move(client_cert_store)),
+       delegate_(delegate) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   if (web_contents_) {
+     CHECK_EQ(web_contents_->GetBrowserContext(), browser_context_.get());
+   }
+ }
+ 
+ SSLClientAuthHandler::~SSLClientAuthHandler() {
+   // Invalidate our WeakPtrs in case invoking the cancellation callback would
+   // cause |this| to be destructed again.
+@@ -105,24 +108,25 @@
+     net::ClientCertIdentityList client_certs) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+ 
+   if (!browser_context_) {
+     delegate_->CancelCertificateSelection();
+     return;
+   }
+ 
+   // SelectClientCertificate() may call back into |delegate_| synchronously and
+   // destroy this object, so guard the cancellation callback logic by a WeakPtr.
+   base::WeakPtr<SSLClientAuthHandler> weak_self = weak_factory_.GetWeakPtr();
+   base::OnceClosure cancellation_callback =
+-      GetContentClient()->browser()->SelectClientCertificate(
+-          browser_context_.get(), process_id_, web_contents_.get(),
++      GetContentClient()->browser()->SelectClientCertificateWithContext(
++          navigation_or_document_.get(), browser_context_.get(), process_id_,
++          web_contents_.get(),
+           cert_request_info_.get(), std::move(client_certs),
+           std::make_unique<ClientCertificateDelegateImpl>(weak_self));
+   if (weak_self) {
+     cancellation_callback_ = std::move(cancellation_callback);
+   } else if (!cancellation_callback.is_null()) {
+     std::move(cancellation_callback).Run();
+   }
+ }
+ 
+ }  // namespace content
+diff --git a/content/browser/storage_partition_impl.cc b/content/browser/storage_partition_impl.cc
+--- a/content/browser/storage_partition_impl.cc
++++ b/content/browser/storage_partition_impl.cc
+@@ -599,32 +599,34 @@
+ 
+ // This class lives on the UI thread. It is self-owned and will delete itself
+ // after any of the SSLClientAuthHandler::Delegate methods are invoked (or when
+ // a mojo connection error occurs).
+ class SSLClientAuthDelegate : public SSLClientAuthHandler::Delegate {
+  public:
+   SSLClientAuthDelegate(
+       mojo::PendingRemote<network::mojom::ClientCertificateResponder>
+           client_cert_responder_remote,
+       BrowserContext* browser_context,
+       int process_id,
+       base::WeakPtr<WebContents> web_contents,
++      scoped_refptr<NavigationOrDocumentHandle> navigation_or_document,
+       const scoped_refptr<net::SSLCertRequestInfo>& cert_info)
+       : client_cert_responder_(std::move(client_cert_responder_remote)),
+         ssl_client_auth_handler_(std::make_unique<SSLClientAuthHandler>(
+             GetContentClient()->browser()->CreateClientCertStore(
+                 browser_context),
+             browser_context->GetWeakPtr(),
+             process_id,
+             web_contents,
++            std::move(navigation_or_document),
+             std::move(cert_info.get()),
+             this)) {
+     DCHECK_CURRENTLY_ON(BrowserThread::UI);
+     DCHECK(client_cert_responder_);
+     client_cert_responder_.set_disconnect_handler(base::BindOnce(
+         &SSLClientAuthDelegate::DeleteSelf, base::Unretained(this)));
+     ssl_client_auth_handler_->SelectCertificate();
+   }
+ 
+   ~SSLClientAuthDelegate() override { DCHECK_CURRENTLY_ON(BrowserThread::UI); }
+ 
+   void DeleteSelf() { delete this; }
+@@ -2514,26 +2516,30 @@
+     CHECK_EQ(web_contents->GetBrowserContext(), browser_context_.get());
+     web_contents_weak = web_contents->GetWeakPtr();
+ 
+     if (context.navigation_or_document()) {
+       auto* render_frame_host = context.navigation_or_document()->GetDocument();
+       if (render_frame_host) {
+         process_id = render_frame_host->GetProcess()->GetDeprecatedID();
+       }
+     }
+   }
+ 
+   // SSLClientAuthDelegate handles its own lifetime.
+-  new SSLClientAuthDelegate(std::move(cert_responder), browser_context(),
+-                            process_id, web_contents_weak, cert_info);
++  new SSLClientAuthDelegate(
++      std::move(cert_responder), browser_context(), process_id,
++      web_contents_weak, context.navigation_or_document()
++                             ? base::WrapRefCounted(context.navigation_or_document())
++                             : nullptr,
++      cert_info);
+ }
+ 
+ void StoragePartitionImpl::OnSSLCertificateError(
+     const GURL& url,
+     int net_error,
+     const net::SSLInfo& ssl_info,
+     bool fatal,
+     OnSSLCertificateErrorCallback response) {
+   URLLoaderNetworkContext context =
+       url_loader_network_observers_.current_context();
+ 
+   // Cancel this request and the prerendering if the request is for a
+diff --git a/chrome/browser/chrome_content_browser_client.h b/chrome/browser/chrome_content_browser_client.h
+--- a/chrome/browser/chrome_content_browser_client.h
++++ b/chrome/browser/chrome_content_browser_client.h
+@@ -462,24 +462,32 @@
+       content::WebContents* web_contents,
+       int cert_error,
+       const net::SSLInfo& ssl_info,
+       const GURL& request_url,
+       bool is_primary_main_frame_request,
+       bool strict_enforcement,
+       base::OnceCallback<void(content::CertificateRequestResultType)> callback)
+       override;
+ #if !BUILDFLAG(IS_ANDROID)
+   bool ShouldDenyRequestOnCertificateError(const GURL main_page_url) override;
+ #endif
+   base::OnceClosure SelectClientCertificate(
++      content::BrowserContext* browser_context,
++      int process_id,
++      content::WebContents* web_contents,
++      net::SSLCertRequestInfo* cert_request_info,
++      net::ClientCertIdentityList client_certs,
++      std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
++  base::OnceClosure SelectClientCertificateWithContext(
++      content::NavigationOrDocumentHandle* navigation_or_document,
+       content::BrowserContext* browser_context,
+       int process_id,
+       content::WebContents* web_contents,
+       net::SSLCertRequestInfo* cert_request_info,
+       net::ClientCertIdentityList client_certs,
+       std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
+   content::MediaObserver* GetMediaObserver() override;
+   content::FeatureObserverClient* GetFeatureObserverClient() override;
+   bool IsPopupBypassAllowed(
+       content::RenderFrameHost* render_frame_host) override;
+   bool CanCreateWindow(content::RenderFrameHost* opener,
+                        const GURL& opener_url,
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -567,24 +567,25 @@
+ #include "chrome/browser/loader/fetch_keepalive_process_manager.h"
+ #include "chrome/browser/metrics/usage_scenario/chrome_responsiveness_calculator_delegate.h"
+ #include "chrome/browser/new_tab_page/new_tab_page_util.h"
+ #include "chrome/browser/picture_in_picture/auto_picture_in_picture_tab_helper.h"
+ #include "chrome/browser/screen_ai/screen_ai_install_state.h"
+ #include "chrome/browser/search/instant_service.h"
+ #include "chrome/browser/search/instant_service_factory.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+ #include "chrome/browser/ui/browser.h"
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/ui/cobble/cobble_chromium.h"
++#include "chrome/browser/ui/cobble/cobble_client_certificates.h"
+ #include "chrome/browser/ui/cobble/cobble_local_file.h"
+ #include "chrome/browser/ui/cobble/cobble_prompts.h"
+ #endif
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/chrome_pages.h"
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/waap/waap_utils.h"
+ #include "chrome/browser/ui/webui/chrome_content_browser_client_webui_part.h"
+ #include "chrome/browser/ui/webui/util/webui_util_desktop.h"
+ #include "chrome/browser/web_applications/isolated_web_apps/chrome_content_browser_client_isolated_web_apps_part.h"
+@@ -4179,24 +4180,37 @@
+   DCHECK(prefs);
+   const PrefService::Preference* pref =
+       prefs->FindPreference(prefs::kPromptOnMultipleMatchingCertificates);
+   if (pref && pref->IsManaged() && pref->GetValue()->is_bool()) {
+     return pref->GetValue()->GetBool();
+   }
+   return false;
+ }
+ 
+ }  // namespace
+ 
+ base::OnceClosure ChromeContentBrowserClient::SelectClientCertificate(
++    content::BrowserContext* browser_context,
++    int process_id,
++    content::WebContents* web_contents,
++    net::SSLCertRequestInfo* cert_request_info,
++    net::ClientCertIdentityList client_certs,
++    std::unique_ptr<content::ClientCertificateDelegate> delegate) {
++  return SelectClientCertificateWithContext(
++      nullptr, browser_context, process_id, web_contents, cert_request_info,
++      std::move(client_certs), std::move(delegate));
++}
++
++base::OnceClosure ChromeContentBrowserClient::SelectClientCertificateWithContext(
++    content::NavigationOrDocumentHandle* navigation_or_document,
+     content::BrowserContext* browser_context,
+     int process_id,
+     content::WebContents* web_contents,
+     net::SSLCertRequestInfo* cert_request_info,
+     net::ClientCertIdentityList client_certs,
+     std::unique_ptr<content::ClientCertificateDelegate> delegate) {
+   prerender::NoStatePrefetchContents* no_state_prefetch_contents =
+       web_contents
+           ? prerender::ChromeNoStatePrefetchContentsDelegate::FromWebContents(
+                 web_contents)
+           : nullptr;
+   if (no_state_prefetch_contents) {
+@@ -4323,33 +4337,38 @@
+   }
+ 
+   if (matching_certificates.empty() &&
+       !CanPromptWithNonmatchingCertificates(profile)) {
+     LOG(WARNING) << "No client cert matched by policy and user selection is "
+                     "not allowed.";
+     // Continue without client certificate. We do this to mimic the case of no
+     // client certificate being present in the profile's certificate store.
+     delegate->ContinueWithCertificate(nullptr, nullptr);
+     return base::OnceClosure();
+   }
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::PageForWebContents(web_contents)) {
++    net::ClientCertIdentityList choices =
++        !matching_certificates.empty() ? std::move(matching_certificates)
++                                       : std::move(nonmatching_certificates);
++    return cobble_chromium::HandleClientCertificateRequest(
++        navigation_or_document, web_contents, cert_request_info,
++        std::move(choices), std::move(delegate));
++  }
++#endif
++
+   // Note: It can happen that both lists are empty, still the selector needs to
+   // be shown - see the comment in SSLClientAuthHandler::DidGetClientCerts()
+   // about platforms not having a client cert store.
+-#if BUILDFLAG(IS_MAC)
+-  if (cobble_chromium::PageForWebContents(web_contents)) {
+-    delegate->ContinueWithCertificate(nullptr, nullptr);
+-    return base::OnceClosure();
+-  }
+-#endif
+   net::ClientCertIdentityList client_cert_choices =
+       !matching_certificates.empty() ? std::move(matching_certificates)
+                                      : std::move(nonmatching_certificates);
+ 
+   return ShowSSLClientCertificateSelector(web_contents, cert_request_info,
+                                           std::move(client_cert_choices),
+                                           std::move(delegate));
+ }
+ 
+ content::MediaObserver* ChromeContentBrowserClient::GetMediaObserver() {
+   return MediaCaptureDevicesDispatcher::GetInstance();
+ }
+@@ -7271,24 +7290,30 @@
+   std::string spc_keychain_access_group;
+ #if BUILDFLAG(IS_MAC)
+   spc_keychain_access_group = kSecurePaymentConfirmationKeychainAccessGroup;
+ #endif  // BUILDFLAG(IS_MAC)
+   payments::CreateSecurePaymentConfirmationService(
+       render_frame_host, std::move(receiver),
+       std::move(spc_keychain_access_group));
+ }
+ 
+ std::unique_ptr<net::ClientCertStore>
+ ChromeContentBrowserClient::CreateClientCertStore(
+     content::BrowserContext* browser_context) {
++#if BUILDFLAG(IS_MAC)
++  if (auto store =
++          cobble_chromium::CreateRestrictedClientCertStoreForFixture()) {
++    return store;
++  }
++#endif
+   return ProfileNetworkContextServiceFactory::GetForContext(browser_context)
+       ->CreateClientCertStore();
+ }
+ 
+ std::unique_ptr<content::LoginDelegate>
+ ChromeContentBrowserClient::CreateLoginDelegate(
+     const net::AuthChallengeInfo& auth_info,
+     content::WebContents* web_contents,
+     content::BrowserContext* browser_context,
+     const content::GlobalRequestID& request_id,
+     bool is_request_for_primary_main_frame_navigation,
+     bool is_request_for_navigation,
+diff --git a/net/ssl/client_cert_store_mac.h b/net/ssl/client_cert_store_mac.h
+--- a/net/ssl/client_cert_store_mac.h
++++ b/net/ssl/client_cert_store_mac.h
+@@ -1,51 +1,55 @@
+ // Copyright 2013 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+ #ifndef NET_SSL_CLIENT_CERT_STORE_MAC_H_
+ #define NET_SSL_CLIENT_CERT_STORE_MAC_H_
+ 
+ #include "base/functional/callback.h"
++#include "base/files/file_path.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "net/base/net_export.h"
+ #include "net/ssl/client_cert_store.h"
+ #include "net/ssl/ssl_cert_request_info.h"
+ 
+ namespace net {
+ 
+ class ClientCertIdentityMac;
+ 
+ class NET_EXPORT ClientCertStoreMac : public ClientCertStore {
+  public:
+   ClientCertStoreMac();
++  explicit ClientCertStoreMac(base::FilePath restricted_keychain);
+ 
+   ClientCertStoreMac(const ClientCertStoreMac&) = delete;
+   ClientCertStoreMac& operator=(const ClientCertStoreMac&) = delete;
+ 
+   ~ClientCertStoreMac() override;
+ 
+   // ClientCertStore:
+   void GetClientCerts(scoped_refptr<const SSLCertRequestInfo> cert_request_info,
+                       ClientCertListCallback callback) override;
+ 
+  private:
+   // TODO(crbug.com/40825523): Improve test coverage and remove/reduce
+   // the friend tests and ForTesting methods.
+   friend class ClientCertStoreMacTest;
+   friend class ClientCertStoreMacTestDelegate;
+ 
+   void OnClientCertsResponse(ClientCertListCallback callback,
+                              ClientCertIdentityList identities);
++
++  const base::FilePath restricted_keychain_;
+ 
+   // A hook for testing. Filters |input_identities| using the logic being used
+   // to filter the system store when GetClientCerts() is called. Implemented by
+   // creating a list of certificates that otherwise would be extracted from the
+   // system store and filtering it using the common logic (less adequate than
+   // the approach used on Windows).
+   bool SelectClientCertsForTesting(
+       std::vector<std::unique_ptr<ClientCertIdentityMac>> input_identities,
+       const SSLCertRequestInfo& cert_request_info,
+       ClientCertIdentityList* selected_identities);
+ 
+   // Testing hook specific to Mac, where the internal logic recognizes preferred
+diff --git a/net/ssl/client_cert_store_mac.cc b/net/ssl/client_cert_store_mac.cc
+--- a/net/ssl/client_cert_store_mac.cc
++++ b/net/ssl/client_cert_store_mac.cc
+@@ -1,23 +1,24 @@
+ // Copyright 2013 The Chromium Authors
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+ #include "net/ssl/client_cert_store_mac.h"
+ 
+ #include <CommonCrypto/CommonDigest.h>
+ #include <CoreFoundation/CFArray.h>
+ #include <CoreServices/CoreServices.h>
+ #include <Security/SecBase.h>
+ #include <Security/Security.h>
++#include <sys/stat.h>
+ 
+ #include <algorithm>
+ #include <functional>
+ #include <memory>
+ #include <string>
+ #include <utility>
+ #include <vector>
+ 
+ #include "base/apple/osstatus_logging.h"
+ #include "base/apple/scoped_cftyperef.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+@@ -290,93 +291,127 @@
+ 
+   if (preferred_sec_identity &&
+       CFEqual(preferred_sec_identity, sec_identity.get())) {
+     *preferred_identity = std::make_unique<ClientCertIdentityMac>(
+         std::move(cert), std::move(sec_identity));
+   } else {
+     regular_identities->push_back(std::make_unique<ClientCertIdentityMac>(
+         std::move(cert), std::move(sec_identity)));
+   }
+ }
+ 
+ ClientCertIdentityList GetClientCertsOnBackgroundThread(
+-    scoped_refptr<const SSLCertRequestInfo> request) {
++    scoped_refptr<const SSLCertRequestInfo> request,
++    const base::FilePath& restricted_keychain_path) {
++  ScopedCFTypeRef<SecKeychainRef> restricted_keychain;
++  if (!restricted_keychain_path.empty()) {
++    struct stat status;
++    if (lstat(restricted_keychain_path.value().c_str(), &status) != 0 ||
++        !S_ISREG(status.st_mode)) {
++      return {};
++    }
++    base::AutoLock lock(crypto::apple::GetSecurityFrameworkLock());
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wdeprecated-declarations"
++    const OSStatus open_status = SecKeychainOpen(
++        restricted_keychain_path.value().c_str(),
++        restricted_keychain.InitializeInto());
++#pragma clang diagnostic pop
++    if (open_status != noErr) {
++      return {};
++    }
++  }
+   std::string server_domain = request->host_and_port.host();
+ 
+   ScopedCFTypeRef<SecIdentityRef> preferred_sec_identity;
+-  if (!server_domain.empty()) {
++  if (!restricted_keychain && !server_domain.empty()) {
+     // See if there's an identity preference for this domain:
+     ScopedCFTypeRef<CFStringRef> domain_str(
+         base::SysUTF8ToCFStringRef("https://" + server_domain));
+     // While SecIdentityCopyPreferred appears to take a list of CA issuers
+     // to restrict the identity search to, within Security.framework the
+     // argument is ignored and filtering unimplemented. See SecIdentity.cpp in
+     // libsecurity_keychain, specifically
+     // _SecIdentityCopyPreferenceMatchingName().
+     {
+       base::AutoLock lock(crypto::apple::GetSecurityFrameworkLock());
+       preferred_sec_identity.reset(
+           SecIdentityCopyPreferred(domain_str.get(), nullptr, nullptr));
+     }
+   }
+ 
+   // Now enumerate the identities in the available keychains.
+   static const void* kKeys[] = {
+       kSecClass, kSecMatchLimit, kSecReturnRef, kSecAttrCanSign,
+   };
+   static const void* kValues[] = {
+       kSecClassIdentity, kSecMatchLimitAll, kCFBooleanTrue, kCFBooleanTrue,
+   };
+-  ScopedCFTypeRef<CFDictionaryRef> query(CFDictionaryCreate(
+-      kCFAllocatorDefault, kKeys, kValues, std::size(kValues),
+-      &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
++  ScopedCFTypeRef<CFDictionaryRef> initial_query(CFDictionaryCreate(
++      kCFAllocatorDefault, kKeys, kValues, std::size(kValues),
++      &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
++  ScopedCFTypeRef<CFMutableDictionaryRef> query(CFDictionaryCreateMutableCopy(
++      kCFAllocatorDefault, 0, initial_query.get()));
++  ScopedCFTypeRef<CFArrayRef> restricted_search;
++  if (restricted_keychain) {
++    const void* keychain = restricted_keychain.get();
++    restricted_search.reset(CFArrayCreate(
++        kCFAllocatorDefault, &keychain, 1, &kCFTypeArrayCallBacks));
++    CFDictionarySetValue(query.get(), kSecMatchSearchList,
++                         restricted_search.get());
++  }
+   ScopedCFTypeRef<CFArrayRef> result;
+   OSStatus err;
+   {
+     base::AutoLock lock(crypto::apple::GetSecurityFrameworkLock());
+     err = SecItemCopyMatching(
+         query.get(), reinterpret_cast<CFTypeRef*>(result.InitializeInto()));
+   }
+   std::unique_ptr<ClientCertIdentityMac> preferred_identity;
+   ClientCertIdentityMacList regular_identities;
+   if (!err) {
+     for (CFIndex i = 0; i < CFArrayGetCount(result.get()); i++) {
+       SecIdentityRef item = reinterpret_cast<SecIdentityRef>(
+           const_cast<void*>(CFArrayGetValueAtIndex(result.get(), i)));
+       AddIdentity(
+           ScopedCFTypeRef<SecIdentityRef>(item, base::scoped_policy::RETAIN),
+           preferred_sec_identity.get(), &regular_identities,
+           &preferred_identity);
+     }
+   }
+ 
+   ClientCertIdentityList selected_identities;
+   GetClientCertsImpl(std::move(preferred_identity),
+-                     std::move(regular_identities), *request, true,
++                     std::move(regular_identities), *request,
++                     restricted_keychain_path.empty(),
+                      &selected_identities);
+   return selected_identities;
+ }
+ 
+ }  // namespace
+ 
+ ClientCertStoreMac::ClientCertStoreMac() = default;
++
++ClientCertStoreMac::ClientCertStoreMac(base::FilePath restricted_keychain)
++    : restricted_keychain_(std::move(restricted_keychain)) {}
+ 
+ ClientCertStoreMac::~ClientCertStoreMac() = default;
+ 
+ void ClientCertStoreMac::GetClientCerts(
+     scoped_refptr<const SSLCertRequestInfo> request,
+     ClientCertListCallback callback) {
+   GetSSLPlatformKeyTaskRunner()->PostTaskAndReplyWithResult(
+       FROM_HERE,
+-      base::BindOnce(&GetClientCertsOnBackgroundThread, std::move(request)),
++      base::BindOnce(&GetClientCertsOnBackgroundThread, std::move(request),
++                     restricted_keychain_),
+       base::BindOnce(&ClientCertStoreMac::OnClientCertsResponse,
+                      weak_factory_.GetWeakPtr(), std::move(callback)));
+ }
+ 
+ void ClientCertStoreMac::OnClientCertsResponse(
+     ClientCertListCallback callback,
+     ClientCertIdentityList identities) {
+   std::move(callback).Run(std::move(identities));
+ }
+ 
+ bool ClientCertStoreMac::SelectClientCertsForTesting(
+     ClientCertIdentityMacList input_identities,

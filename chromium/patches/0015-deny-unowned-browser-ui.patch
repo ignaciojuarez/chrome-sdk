@@ -1,0 +1,460 @@
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -5,4 +5,7 @@
+ #include "chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h"
+ 
+ #include "base/check_deref.h"
++#include "base/functional/bind.h"
++#include "base/memory/weak_ptr.h"
++#include "base/task/sequenced_task_runner.h"
+ #include "base/metrics/histogram_macros.h"
+@@ -75,4 +78,6 @@
+ #include "content/public/browser/navigation_entry.h"
+ #include "content/public/browser/page_navigator.h"
++#include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/render_process_host.h"
++#include "content/public/browser/weak_document_ptr.h"
+ #include "content/public/browser/render_widget_host_view.h"
+@@ -950,6 +950,46 @@
+ 
+ void BrowserWebContentsDelegate::ShowRepostFormWarningDialog(
+     content::WebContents* source) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::PageForWebContents(source)) {
++    content::NavigationController& controller = source->GetController();
++    content::NavigationEntry* entry = controller.GetLastCommittedEntry();
++    content::RenderFrameHost* frame = source->GetPrimaryMainFrame();
++    if (!entry || !frame) {
++      controller.CancelPendingReload();
++      return;
++    }
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            [](base::WeakPtr<content::WebContents> contents, int entry_id,
++               content::WeakDocumentPtr document) {
++              if (!contents) {
++                return;
++              }
++              content::NavigationController& controller =
++                  contents->GetController();
++              content::NavigationEntry* current =
++                  controller.GetLastCommittedEntry();
++              content::RenderFrameHost* frame =
++                  contents->GetPrimaryMainFrame();
++              CCSPageRef page =
++                  cobble_chromium::PageForWebContents(contents.get());
++              if (cobble_chromium::IsStopping() || !page || !current ||
++                  current->GetUniqueID() != entry_id || !frame ||
++                  document.AsRenderFrameHostIfValid() != frame ||
++                  controller.GetPendingEntry() ||
++                  cobble_chromium::PageHasPendingPromptOrMedia(page)) {
++                controller.CancelPendingReload();
++                return;
++              }
++              controller.ContinuePendingReload();
++            },
++            source->GetWeakPtr(), entry->GetUniqueID(),
++            frame->GetWeakDocumentPtr()));
++    return;
++  }
++#endif
+   TabModalConfirmDialog::Create(
+       std::make_unique<RepostFormWarningController>(source), source);
+ }
+diff --git a/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc b/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc
+--- a/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc
++++ b/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc
+@@ -7,6 +7,7 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
++#include "build/build_config.h"
+ #include "chrome/browser/picture_in_picture/picture_in_picture_occlusion_tracker.h"
+ #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
+ #include "chrome/browser/platform_util.h"
+@@ -31,6 +32,10 @@
+ #include "ui/views/layout/fill_layout.h"
+ #include "ui/views/widget/widget.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+ #include "chrome/browser/ui/extensions/extensions_dialogs.h"
+ #include "chrome/browser/ui/views/extensions/extensions_container_views.h"
+@@ -274,6 +279,12 @@
+     std::unique_ptr<permissions::ChooserController> controller) {
+   auto* contents = content::WebContents::FromRenderFrameHost(owner);
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::PageForWebContents(contents)) {
++    return base::DoNothing();
++  }
++#endif
++
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+   auto* browser_context = owner->GetBrowserContext();
+   if (extensions::AppWindowRegistry::Get(browser_context)
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -38,4 +38,5 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/i18n/base_i18n_switches.h"
+ #include "base/i18n/character_encoding.h"
++#include "base/memory/weak_ptr.h"
+ #include "base/memory/raw_ptr.h"
+@@ -355,5 +355,6 @@
+ #include "content/public/browser/isolated_web_apps_policy.h"
+ #include "content/public/browser/legacy_tech_cookie_issue_details.h"
+ #include "content/public/browser/navigation_handle.h"
++#include "content/public/browser/navigation_throttle.h"
+ #include "content/public/browser/network_service_instance.h"
+ #include "content/public/browser/overlay_window.h"
+@@ -4331,6 +4331,12 @@
+   // Note: It can happen that both lists are empty, still the selector needs to
+   // be shown - see the comment in SSLClientAuthHandler::DidGetClientCerts()
+   // about platforms not having a client cert store.
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::PageForWebContents(web_contents)) {
++    delegate->ContinueWithCertificate(nullptr, nullptr);
++    return base::OnceClosure();
++  }
++#endif
+   net::ClientCertIdentityList client_cert_choices =
+       !matching_certificates.empty() ? std::move(matching_certificates)
+                                      : std::move(nonmatching_certificates);
+@@ -5565,12 +5571,87 @@
+   if (media_router::MediaRouterEnabled(web_contents->GetBrowserContext())) {
+     media_router::WebContentsPresentationManager::Get(web_contents)
+         ->RemoveObserver(observer);
+   }
+ }
+ 
++#if BUILDFLAG(IS_MAC)
++namespace {
++
++class CobblePostReloadNavigationThrottle final
++    : public content::NavigationThrottle {
++ public:
++  explicit CobblePostReloadNavigationThrottle(
++      content::NavigationThrottleRegistry& registry)
++      : content::NavigationThrottle(registry) {}
++
++  ~CobblePostReloadNavigationThrottle() override {
++    weak_factory_.InvalidateWeakPtrs();
++    if (prompt_id_) {
++      cobble_chromium::CancelFormRepostConfirmation(prompt_id_);
++    }
++  }
++
++  ThrottleCheckResult WillStartRequest() override {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(&CobblePostReloadNavigationThrottle::BeginPrompt,
++                       weak_factory_.GetWeakPtr()));
++    return DEFER;
++  }
++
++  const char* GetNameForLogging() override {
++    return "CobblePostReloadNavigationThrottle";
++  }
++
++ private:
++  void BeginPrompt() {
++    content::WebContents* contents = navigation_handle()->GetWebContents();
++    content::RenderFrameHost* frame = content::RenderFrameHost::FromID(
++        navigation_handle()->GetPreviousRenderFrameHostId());
++    if (!cobble_chromium::PageForWebContents(contents) || !frame ||
++        content::WebContents::FromRenderFrameHost(frame) != contents) {
++      CancelDeferredNavigation(CANCEL_AND_IGNORE);
++      return;
++    }
++    base::WeakPtr<CobblePostReloadNavigationThrottle> alive =
++        weak_factory_.GetWeakPtr();
++    const uint64_t prompt_id =
++        cobble_chromium::RequestFormRepostConfirmation(
++            contents, frame,
++            base::BindOnce(&CobblePostReloadNavigationThrottle::FinishPrompt,
++                           weak_factory_.GetWeakPtr()));
++    if (alive) {
++      prompt_id_ = prompt_id;
++    }
++  }
++
++  void FinishPrompt(bool accept) {
++    prompt_id_ = 0;
++    if (accept) {
++      Resume();
++    } else {
++      CancelDeferredNavigation(CANCEL_AND_IGNORE);
++    }
++  }
++
++  uint64_t prompt_id_ = 0;
++  base::WeakPtrFactory<CobblePostReloadNavigationThrottle> weak_factory_{this};
++};
++
++}  // namespace
++#endif
++
+ void ChromeContentBrowserClient::CreateThrottlesForNavigation(
+     content::NavigationThrottleRegistry& registry) {
+   CreateAndAddChromeThrottlesForNavigation(registry);
++#if BUILDFLAG(IS_MAC)
++  content::NavigationHandle& handle = registry.GetNavigationHandle();
++  if (cobble_chromium::PageForWebContents(handle.GetWebContents()) &&
++      handle.IsPost() && handle.GetReloadType() != content::ReloadType::NONE) {
++    registry.AddThrottle(
++        std::make_unique<CobblePostReloadNavigationThrottle>(registry));
++  }
++#endif
+ }
+ 
+ void ChromeContentBrowserClient::CreateThrottlesForCommitWithoutUrlLoader(
+diff --git a/chrome/browser/payments/payment_request_factory.cc b/chrome/browser/payments/payment_request_factory.cc
+--- a/chrome/browser/payments/payment_request_factory.cc
++++ b/chrome/browser/payments/payment_request_factory.cc
+@@ -8,14 +8,20 @@
+ #include <utility>
+ 
+ #include "base/no_destructor.h"
++#include "build/build_config.h"
+ #include "chrome/browser/payments/chrome_payment_request_delegate.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "components/payments/content/payment_request.h"
+ #include "components/payments/core/payment_request_metrics.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/web_contents.h"
+ #include "mojo/public/cpp/bindings/message.h"
+ #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom-shared.h"
++
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ 
+ namespace payments {
+ 
+@@ -77,6 +83,13 @@
+     return;
+   }
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::PageForWebContents(
++          content::WebContents::FromRenderFrameHost(render_frame_host))) {
++    return;
++  }
++#endif
++
+   RecordCanMakePaymentAllowedHistogram(render_frame_host->GetBrowserContext());
+ 
+   if (GetTestingFactoryCallback()) {
+diff --git a/chrome/browser/bluetooth/chrome_bluetooth_delegate.cc b/chrome/browser/bluetooth/chrome_bluetooth_delegate.cc
+--- a/chrome/browser/bluetooth/chrome_bluetooth_delegate.cc
++++ b/chrome/browser/bluetooth/chrome_bluetooth_delegate.cc
+@@ -7,6 +7,7 @@
+ #include <memory>
+ 
+ #include "base/metrics/field_trial_params.h"
++#include "build/build_config.h"
+ #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "components/content_settings/core/browser/host_content_settings_map.h"
+@@ -19,6 +20,10 @@
+ #include "content/public/browser/site_instance.h"
+ #include "url/gurl.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ ChromeBluetoothDelegate::ChromeBluetoothDelegate(std::unique_ptr<Client> client)
+     : permissions::BluetoothDelegateImpl(std::move(client)) {}
+ 
+@@ -46,6 +51,13 @@
+     content::BrowserContext* browser_context,
+     const url::Origin& requesting_origin,
+     const url::Origin& embedding_origin) {
++#if BUILDFLAG(IS_MAC)
++  // Cobble does not expose Web Bluetooth. Refuse before RequestDevice starts
++  // the platform adapter, which may synchronously enter macOS Bluetooth UI.
++  if (cobble_chromium::IsEnabled()) {
++    return AllowWebBluetoothResult::kBlockGloballyDisabled;
++  }
++#endif
+   // TODO(crbug.com/40462828): Don't disable if
+   // base::CommandLine::ForCurrentProcess()->
+   // HasSwitch(switches::kEnableWebBluetooth) is true.
+diff --git a/chrome/browser/usb/chrome_usb_delegate.cc b/chrome/browser/usb/chrome_usb_delegate.cc
+--- a/chrome/browser/usb/chrome_usb_delegate.cc
++++ b/chrome/browser/usb/chrome_usb_delegate.cc
+@@ -11,6 +11,7 @@
+ #include "base/observer_list.h"
+ #include "base/observer_list_types.h"
+ #include "base/scoped_observation.h"
++#include "build/build_config.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
+ #include "chrome/browser/usb/usb_blocklist.h"
+@@ -31,6 +32,10 @@
+ #include "services/device/public/mojom/usb_enumeration_options.mojom.h"
+ #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom-shared.h"
+ #include "third_party/blink/public/common/features_generated.h"
++
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+ #include "base/containers/fixed_flat_set.h"
+@@ -295,6 +300,11 @@
+ bool ChromeUsbDelegate::CanRequestDevicePermission(
+     content::BrowserContext* browser_context,
+     const url::Origin& origin) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+   return browser_context &&
+          GetChooserContext(browser_context)->CanRequestObjectPermission(origin);
+ }
+diff --git a/chrome/browser/hid/chrome_hid_delegate.cc b/chrome/browser/hid/chrome_hid_delegate.cc
+--- a/chrome/browser/hid/chrome_hid_delegate.cc
++++ b/chrome/browser/hid/chrome_hid_delegate.cc
+@@ -11,6 +11,7 @@
+ #include "base/notimplemented.h"
+ #include "base/observer_list.h"
+ #include "base/scoped_observation.h"
++#include "build/build_config.h"
+ #include "chrome/browser/hid/hid_chooser_context.h"
+ #include "chrome/browser/hid/hid_chooser_context_factory.h"
+ #include "chrome/browser/hid/hid_connection_tracker.h"
+@@ -25,6 +26,10 @@
+ #include "extensions/buildflags/buildflags.h"
+ #include "mojo/public/cpp/bindings/callback_helpers.h"
+ #include "services/device/public/mojom/hid.mojom-forward.h"
++
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+ #include "extensions/browser/guest_view/web_view/web_view_guest.h"
+@@ -237,6 +242,11 @@
+ bool ChromeHidDelegate::CanRequestDevicePermission(
+     content::BrowserContext* browser_context,
+     const url::Origin& origin) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+   return browser_context &&
+          GetChooserContext(browser_context)->CanRequestObjectPermission(origin);
+ }
+diff --git a/chrome/browser/serial/chrome_serial_delegate.cc b/chrome/browser/serial/chrome_serial_delegate.cc
+--- a/chrome/browser/serial/chrome_serial_delegate.cc
++++ b/chrome/browser/serial/chrome_serial_delegate.cc
+@@ -6,6 +6,8 @@
+ 
+ #include <utility>
+ 
++#include "build/build_config.h"
++
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/serial/serial_chooser_context.h"
+ #include "chrome/browser/serial/serial_chooser_context_factory.h"
+@@ -17,6 +19,10 @@
+ #include "content/public/browser/site_instance.h"
+ #include "content/public/browser/storage_partition.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ namespace {
+ 
+ SerialChooserContext* GetChooserContext(content::RenderFrameHost* frame) {
+@@ -63,6 +69,11 @@
+ 
+ bool ChromeSerialDelegate::CanRequestPortPermission(
+     content::RenderFrameHost* frame) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+   if (!MayUseSerial(frame)) {
+     return false;
+   }
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h
+index 72ad58b..5df40b2 100644
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h
+@@ -51,6 +51,7 @@ class BrowserWebContentsDelegate : public content::WebContentsDelegate {
+       const BrowserWindowInterface* browser);
+ 
+   // content::WebContentsDelegate:
++  bool IsDocumentPictureInPictureBlockedBySystem() const override;
+   content::PictureInPictureResult EnterPictureInPicture(
+       content::WebContents* web_contents) override;
+   void ExitPictureInPicture() override;
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+index 92aca74..cf60ccf 100644
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -292,9 +292,23 @@ const BrowserWebContentsDelegate* BrowserWebContentsDelegate::From(
+ 
+ BrowserWebContentsDelegate::~BrowserWebContentsDelegate() = default;
+ 
++bool BrowserWebContentsDelegate::
++    IsDocumentPictureInPictureBlockedBySystem() const {
++#if BUILDFLAG(IS_MAC)
++  return cobble_chromium::IsEnabled();
++#else
++  return false;
++#endif
++}
++
+ content::PictureInPictureResult
+ BrowserWebContentsDelegate::EnterPictureInPicture(
+     content::WebContents* web_contents) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return content::PictureInPictureResult::kNotSupported;
++  }
++#endif
+   return PictureInPictureWindowManager::GetInstance()
+       ->EnterVideoPictureInPicture(web_contents);
+ }
+diff --git a/chrome/browser/ui/navigator/browser_navigator.cc b/chrome/browser/ui/navigator/browser_navigator.cc
+index f8d51fa..be38e10 100644
+--- a/chrome/browser/ui/navigator/browser_navigator.cc
++++ b/chrome/browser/ui/navigator/browser_navigator.cc
+@@ -29,6 +29,9 @@
+ #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
+ #include "chrome/browser/tab_contents/tab_util.h"
+ #include "chrome/browser/ui/browser.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "chrome/browser/ui/browser_init_state.h"
+ #include "chrome/browser/ui/browser_ui_controller/browser_ui_controller.h"
+ #include "chrome/browser/ui/browser_window.h"
+@@ -677,6 +680,11 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
+   // allowed to open document PiP.  See `PictureInPictureWindowManager` for
+   // details on what's allowed.
+   if (params->disposition == WindowOpenDisposition::NEW_PICTURE_IN_PICTURE) {
++#if BUILDFLAG(IS_MAC)
++    if (cobble_chromium::IsEnabled()) {
++      return nullptr;
++    }
++#endif
+     const GURL& url = params->source_contents
+                           ? params->source_contents->GetLastCommittedURL()
+                           : GURL();

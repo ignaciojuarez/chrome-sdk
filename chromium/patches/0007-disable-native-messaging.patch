@@ -1,0 +1,66 @@
+diff --git a/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc b/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc
+--- a/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc
++++ b/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc
+@@ -12,13 +12,11 @@
+ #include "chrome/browser/extensions/api/messaging/incognito_connectability.h"
+ #include "chrome/browser/extensions/extension_tab_util.h"
+ #include "chrome/browser/profiles/profile.h"
+-#include "components/prefs/pref_service.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "extensions/browser/api/messaging/native_message_host.h"
+ #include "extensions/browser/api/messaging/native_message_port.h"
+-#include "extensions/browser/pref_names.h"
+ #include "extensions/buildflags/buildflags.h"
+ #include "extensions/common/api/messaging/port_id.h"
+ #include "extensions/common/extension.h"
+@@ -39,44 +37,11 @@
+ 
+ MessagingDelegate::PolicyPermission
+ ChromeMessagingDelegate::IsNativeMessagingHostAllowed(
+-    content::BrowserContext* browser_context,
+-    const std::string& native_host_name) {
++    content::BrowserContext*,
++    const std::string&) {
+   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+-
+-  PrefService* pref_service =
+-      Profile::FromBrowserContext(browser_context)->GetPrefs();
+-
+-  PolicyPermission allow_result = PolicyPermission::ALLOW_ALL;
+-  if (pref_service->IsManagedPreference(
+-          pref_names::kNativeMessagingUserLevelHosts)) {
+-    if (!pref_service->GetBoolean(pref_names::kNativeMessagingUserLevelHosts)) {
+-      allow_result = PolicyPermission::ALLOW_SYSTEM_ONLY;
+-    }
+-  }
+-
+-  // All native messaging hosts are allowed if there is no blocklist.
+-  if (!pref_service->IsManagedPreference(
+-          pref_names::kNativeMessagingBlocklist)) {
+-    return allow_result;
+-  }
+-  const base::ListValue& blocklist =
+-      pref_service->GetList(pref_names::kNativeMessagingBlocklist);
+-
+-  // Check if the name or the wildcard is in the blocklist.
+-  if (!blocklist.contains(native_host_name) && !blocklist.contains("*")) {
+-    return allow_result;
+-  }
+-
+-  // The native messaging host is blocklisted. Check the allowlist.
+-  if (pref_service->IsManagedPreference(
+-          pref_names::kNativeMessagingAllowlist)) {
+-    const base::ListValue& allowlist =
+-        pref_service->GetList(pref_names::kNativeMessagingAllowlist);
+-    if (allowlist.contains(native_host_name)) {
+-      return allow_result;
+-    }
+-  }
+-
++  // Cobble does not support or allow native messaging hosts. This check runs
++  // before host discovery and process launch for every extension context.
+   return PolicyPermission::DISALLOW;
+ }
+ 

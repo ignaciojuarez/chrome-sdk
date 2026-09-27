@@ -1,0 +1,358 @@
+diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
+index ff35d05..9799e09 100644
+--- a/chrome/browser/devtools/devtools_ui_bindings.cc
++++ b/chrome/browser/devtools/devtools_ui_bindings.cc
+@@ -38,6 +38,9 @@
+ #include "base/version_info/channel.h"
+ #include "build/branding_buildflags.h"
+ #include "build/build_config.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_devtools.h"
++#endif
+ #include "chrome/browser/about_flags.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/devtools/aida_service_handler.h"
+@@ -1318,6 +1321,17 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
+   content::WebContents* target_tab = delegate_->GetInspectedWebContents();
+ 
+   NetworkResourceLoader::URLLoaderFactoryHolder url_loader_factory;
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents()) && gurl.SchemeIsFile()) {
++    base::DictValue response_dict;
++    response_dict.Set("statusCode", 403);
++    response_dict.Set("netError", net::ERR_ACCESS_DENIED);
++    response_dict.Set("netErrorName", net::ErrorToString(net::ERR_ACCESS_DENIED));
++    auto response = base::Value(std::move(response_dict));
++    std::move(callback).Run(&response);
++    return;
++  }
++#endif
+   if (gurl.SchemeIsFile()) {
+     if (!is_local_frontend_) {
+       if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+@@ -1421,6 +1435,11 @@ void DevToolsUIBindings::OpenSearchResultsInNewTab(const std::string& query) {
+ }
+ 
+ void DevToolsUIBindings::ShowItemInFolder(const std::string& file_system_path) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    return;
++  }
++#endif
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
+   if (!file_helper_.IsFileInFileSystem(file_system_path)) {
+@@ -1433,6 +1452,12 @@ void DevToolsUIBindings::SaveToFile(const std::string& url,
+                                     const std::string& content,
+                                     bool save_as,
+                                     bool is_base64) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    CanceledFileSaveAs(url);
++    return;
++  }
++#endif
+   file_helper_.Save(
+       url, content, save_as, is_base64,
+       base::BindOnce(&DevToolsSelectFileDialog::SelectFile, web_contents_,
+@@ -1445,6 +1470,12 @@ void DevToolsUIBindings::SaveToFile(const std::string& url,
+ 
+ void DevToolsUIBindings::AppendToFile(const std::string& url,
+                                       const std::string& content) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    CanceledFileSaveAs(url);
++    return;
++  }
++#endif
+   file_helper_.Append(url, content,
+                       base::BindOnce(&DevToolsUIBindings::AppendedTo,
+                                      weak_factory_.GetWeakPtr(), url));
+@@ -1453,6 +1484,13 @@ void DevToolsUIBindings::AppendToFile(const std::string& url,
+ void DevToolsUIBindings::RequestFileSystems() {
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    CallClientMethod("DevToolsAPI", "fileSystemsLoaded",
++                     base::Value(base::ListValue()));
++    return;
++  }
++#endif
+   base::ListValue file_systems_value;
+   for (auto const& file_system : file_helper_.GetFileSystems()) {
+     file_systems_value.Append(CreateFileSystemValue(file_system));
+@@ -1464,6 +1502,12 @@ void DevToolsUIBindings::RequestFileSystems() {
+ void DevToolsUIBindings::AddFileSystem(const std::string& type) {
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    FileSystemAdded("File systems are unavailable in Cobble DevTools.", nullptr);
++    return;
++  }
++#endif
+   file_helper_.AddFileSystem(
+       type,
+       base::BindOnce(&DevToolsSelectFileDialog::SelectFile, web_contents_,
+@@ -1473,6 +1517,11 @@ void DevToolsUIBindings::AddFileSystem(const std::string& type) {
+ }
+ 
+ void DevToolsUIBindings::RemoveFileSystem(const std::string& file_system_path) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    return;
++  }
++#endif
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
+   file_helper_.RemoveFileSystem(file_system_path);
+@@ -1480,6 +1529,12 @@ void DevToolsUIBindings::RemoveFileSystem(const std::string& file_system_path) {
+ 
+ void DevToolsUIBindings::UpgradeDraggedFileSystemPermissions(
+     const std::string& file_system_url) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    FileSystemAdded("File systems are unavailable in Cobble DevTools.", nullptr);
++    return;
++  }
++#endif
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
+   file_helper_.UpgradeDraggedFileSystemPermissions(
+@@ -1496,6 +1551,12 @@ void DevToolsUIBindings::ConnectAutomaticFileSystem(
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    ConnectAutomaticFileSystemDone(std::move(callback), false);
++    return;
++  }
++#endif
+   // Ensure that the |file_system_uuid| is indeed a valid UUID.
+   base::Uuid uuid = base::Uuid::ParseCaseInsensitive(file_system_uuid);
+   if (!uuid.is_valid()) {
+@@ -1525,6 +1586,11 @@ void DevToolsUIBindings::ConnectAutomaticFileSystemDone(
+ void DevToolsUIBindings::DisconnectAutomaticFileSystem(
+     const std::string& file_system_path) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    return;
++  }
++#endif
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
+   file_helper_.DisconnectAutomaticFileSystem(file_system_path);
+@@ -1537,6 +1603,12 @@ void DevToolsUIBindings::IndexPath(
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    IndexingDone(index_request_id, file_system_path);
++    return;
++  }
++#endif
+   if (!file_helper_.IsFileSystemAdded(file_system_path)) {
+     IndexingDone(index_request_id, file_system_path);
+     return;
+@@ -1584,6 +1656,12 @@ void DevToolsUIBindings::SearchInPath(int search_request_id,
+                                       const std::string& file_system_path,
+                                       const std::string& query) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    SearchCompleted(search_request_id, file_system_path, {});
++    return;
++  }
++#endif
+   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
+         frontend_host_);
+   if (!file_helper_.IsFileSystemAdded(file_system_path)) {
+@@ -1627,6 +1705,11 @@ void DevToolsUIBindings::SetDevicesDiscoveryConfig(
+     const std::string& port_forwarding_config,
+     bool network_discovery_enabled,
+     const std::string& network_discovery_config) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    return;
++  }
++#endif
+   std::optional<base::DictValue> parsed_port_forwarding =
+       base::JSONReader::ReadDict(port_forwarding_config,
+                                  base::JSON_PARSE_CHROMIUM_EXTENSIONS);
+@@ -1687,6 +1770,11 @@ void DevToolsUIBindings::SendPortForwardingStatus(base::Value status) {
+ }
+ 
+ void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
++    enabled = false;
++  }
++#endif
+ #if BUILDFLAG(IS_ANDROID)
+   NOTIMPLEMENTED();
+ #else
+diff --git a/chrome/browser/devtools/devtools_window.cc b/chrome/browser/devtools/devtools_window.cc
+index 4bf7a56..364d907 100644
+--- a/chrome/browser/devtools/devtools_window.cc
++++ b/chrome/browser/devtools/devtools_window.cc
+@@ -42,6 +42,8 @@
+ #include "chrome/browser/profiles/profile.h"
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/renderer_host/chrome_render_widget_host_view_mac_history_swiping_control.h"
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#include "chrome/browser/ui/cobble/cobble_devtools.h"
+ #endif
+ #include "chrome/browser/search_engines/template_url_service_factory.h"
+ #include "chrome/browser/tab_list/tab_list_interface.h"
+@@ -1403,6 +1405,12 @@ DevToolsWindow* DevToolsWindow::Create(
+   }
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::HasPendingOwnedDevTools(inspected_web_contents)) {
++    can_dock = false;
++  }
++#endif
++
+   // Create WebContents with devtools.
+   GURL url(GetDevToolsURL(profile, frontend_type, frontend_url, can_dock, panel,
+                           has_other_clients, browser_connection));
+@@ -1532,6 +1540,12 @@ WebContents* DevToolsWindow::OpenURLFromTab(
+     base::OnceCallback<void(content::NavigationHandle&)>
+         navigation_handle_callback) {
+   DCHECK(source == main_web_contents_);
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_) &&
++      !params.url.SchemeIs(content::kChromeDevToolsScheme)) {
++    return nullptr;
++  }
++#endif
+   if (!params.url.SchemeIs(content::kChromeDevToolsScheme)) {
+     // TODO(https://crbug.com/40275094): Plumb the `navigation_handle_callback`.
+     return OpenURLFromInspectedTab(params);
+@@ -1595,6 +1609,13 @@ WebContents* DevToolsWindow::AddNewContents(
+     return nullptr;
+   }
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_)) {
++    *was_blocked = true;
++    return nullptr;
++  }
++#endif
++
+   WebContents* inspected_web_contents = GetInspectedWebContents();
+   if (inspected_web_contents) {
+     inspected_web_contents->GetDelegate()->AddNewContents(
+@@ -1689,6 +1710,11 @@ void DevToolsWindow::BeforeUnloadFired(WebContents* tab,
+ 
+ content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager(
+     WebContents* source) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(source)) {
++    return cobble_chromium::GetDevToolsJavaScriptDialogManager();
++  }
++#endif
+   return javascript_dialogs::AppModalDialogManager::GetInstance();
+ }
+ 
+@@ -1696,6 +1722,12 @@ void DevToolsWindow::RunFileChooser(
+     content::RenderFrameHost* render_frame_host,
+     scoped_refptr<content::FileSelectListener> listener,
+     const blink::mojom::FileChooserParams& params) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_)) {
++    listener->FileSelectionCanceled();
++    return;
++  }
++#endif
+   FileSelectHelper::RunFileChooser(render_frame_host, std::move(listener),
+                                    params);
+ }
+@@ -1742,6 +1774,11 @@ void DevToolsWindow::Close(DevToolsClosedByAction closed_by) {
+ }
+ 
+ void DevToolsWindow::Inspect(scoped_refptr<content::DevToolsAgentHost> host) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_)) {
++    return;
++  }
++#endif
+   DevToolsWindow::OpenDevToolsWindow(host, profile_,
+                                      DevToolsOpenedByAction::kUnknown);
+ }
+@@ -1774,6 +1811,12 @@ void DevToolsWindow::SetIsDocked(bool dock_requested) {
+     return;
+   }
+ 
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_)) {
++    dock_requested = false;
++  }
++#endif
++
+   DCHECK(can_dock_ || !dock_requested);
+   if (!can_dock_) {
+     dock_requested = false;
+@@ -1855,6 +1898,11 @@ int DevToolsWindow::GetClosedByForLogging() {
+ }
+ 
+ void DevToolsWindow::OpenInNewTab(const GURL& url) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_)) {
++    return;
++  }
++#endif
+   GURL fixed_url = url;
+   WebContents* inspected_web_contents = GetInspectedWebContents();
+   int child_id = content::ChildProcessHost::kInvalidUniqueID;
+@@ -1962,6 +2010,11 @@ void DevToolsWindow::RenderProcessGone(bool crashed) {
+ }
+ 
+ void DevToolsWindow::ShowCertificateViewer(const std::string& cert_chain) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_)) {
++    return;
++  }
++#endif
+   std::optional<base::Value> value =
+       base::JSONReader::Read(cert_chain, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
+   CHECK(value && value->is_list());
+@@ -2042,6 +2095,11 @@ void DevToolsWindow::ConnectionReady() {
+ }
+ 
+ void DevToolsWindow::SetOpenNewWindowForPopups(bool value) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsOwnedDevTools(main_web_contents_)) {
++    value = false;
++  }
++#endif
+   open_new_window_for_popups_ = value;
+ }
+ 
+@@ -2085,8 +2143,19 @@ void DevToolsWindow::CreateDevToolsBrowser() {
+       BrowserWindowInterface::CreationStatus::kOk) {
+     return;
+   }
+-  browser_ = CreateBrowserWindow(
+-      BrowserWindowCreateParams::CreateForDevTools(profile_));
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    browser_ = cobble_chromium::CreateOwnedDevToolsBrowser(
++        profile_, GetInspectedWebContents());
++  } else
++#endif
++  {
++    browser_ = CreateBrowserWindow(
++        BrowserWindowCreateParams::CreateForDevTools(profile_));
++  }
++  if (!browser_) {
++    return;
++  }
+   browser_->GetTabStripModel()->AddWebContents(
+       OwnedMainWebContents::TakeWebContents(
+           std::move(owned_main_web_contents_)),

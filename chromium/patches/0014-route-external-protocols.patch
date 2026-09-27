@@ -1,0 +1,20 @@
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -1290,6 +1290,16 @@ void LaunchURL(
+     }
+   }
+
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    cobble_chromium::HandleExternalProtocol(
++        web_contents, initiator_document.AsRenderFrameHostIfValid(), url,
++        initiating_origin, has_user_gesture, is_primary_main_frame,
++        is_in_fenced_frame_tree);
++    return;
++  }
++#endif
++
+   bool is_allowlisted = false;
+   PolicyBlocklistService* service =
+       ChromePolicyBlocklistServiceFactory::GetForProfile(

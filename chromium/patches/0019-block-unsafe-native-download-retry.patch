@@ -1,0 +1,100 @@
+diff --git a/components/download/public/common/download_item.h b/components/download/public/common/download_item.h
+--- a/components/download/public/common/download_item.h
++++ b/components/download/public/common/download_item.h
+@@ -275,6 +275,10 @@
+   // save-page, failed, and other implementations conservatively return false.
+   virtual bool WasCreatedFromGET() const;
+ 
++  // Permanently prevent a new network request when this item is interrupted.
++  // Embedders configure this before Start; in-flight pause/resume still works.
++  virtual void DisallowResumption();
++
+   // Returns true if the download is in a terminal state. This includes
+   // completed downloads, cancelled downloads, and interrupted downloads that
+   // can't be resumed.
+diff --git a/components/download/public/common/download_item.cc b/components/download/public/common/download_item.cc
+--- a/components/download/public/common/download_item.cc
++++ b/components/download/public/common/download_item.cc
+@@ -27,6 +27,8 @@
+   return false;
+ }
+ 
++void DownloadItem::DisallowResumption() {}
++
+ void DownloadItem::SetURLLoaderFactory(
+     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {}
+ 
+diff --git a/components/download/public/common/download_item_impl.h b/components/download/public/common/download_item_impl.h
+--- a/components/download/public/common/download_item_impl.h
++++ b/components/download/public/common/download_item_impl.h
+@@ -283,6 +283,7 @@
+   bool IsTemporary() const override;
+   bool CanResume() const override;
+   bool WasCreatedFromGET() const override;
++  void DisallowResumption() override;
+   bool IsDone() const override;
+   int64_t GetBytesWasted() const override;
+   int32_t GetAutoResumeCount() const override;
+@@ -813,6 +814,7 @@
+ 
+   // Immutable method provenance for safe user-initiated restart.
+   bool original_request_was_get_ = false;
++  bool resumption_disallowed_ = false;
+ 
+   // True if the download was auto-opened. We set this rather than using
+   // an observer as it's frequently possible for the download to be auto opened
+diff --git a/components/download/internal/common/download_item_impl.cc b/components/download/internal/common/download_item_impl.cc
+--- a/components/download/internal/common/download_item_impl.cc
++++ b/components/download/internal/common/download_item_impl.cc
+@@ -923,6 +923,11 @@
+   return original_request_was_get_;
+ }
+ 
++void DownloadItemImpl::DisallowResumption() {
++  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++  resumption_disallowed_ = true;
++}
++
+ bool DownloadItemImpl::IsDone() const {
+   return IsDownloadDone(GetURL(), GetState(), GetLastReason());
+ }
+@@ -1412,6 +1417,9 @@
+ 
+ ResumeMode DownloadItemImpl::GetResumeMode() const {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
++  if (resumption_disallowed_) {
++    return ResumeMode::INVALID;
++  }
+ 
+   // We can't continue without a handle on the intermediate file.
+   // We also can't continue if we don't have some verifier to make sure
+@@ -2591,7 +2599,7 @@
+     ResumptionRequestSource source) {
+   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+   // If we're not interrupted, ignore the request; our caller is drunk.
+-  if (state_ != INTERRUPTED_INTERNAL)
++  if (state_ != INTERRUPTED_INTERNAL || resumption_disallowed_)
+     return;
+ 
+   // We are starting a new request. Shake off all pending operations.
+diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
+--- a/chrome/browser/download/chrome_download_manager_delegate.cc
++++ b/chrome/browser/download/chrome_download_manager_delegate.cc
+@@ -2547,6 +2547,17 @@
+ #if !BUILDFLAG(IS_ANDROID)
+ void ChromeDownloadManagerDelegate::AttachExtraInfo(
+     download::DownloadItem* item) {
++#if BUILDFLAG(IS_MAC)
++  // This runs before Start, so native automatic retry cannot replay a POST
++  // before the SDK download observer sees the interruption. Historical items
++  // lack method provenance and also fail closed. Ordinary Chrome is unchanged.
++  if (cobble_chromium::IsEnabled() &&
++      (!item->WasCreatedFromGET() ||
++       !item->GetOriginalUrl().SchemeIsHTTPOrHTTPS() ||
++       !item->GetURL().SchemeIsHTTPOrHTTPS())) {
++    item->DisallowResumption();
++  }
++#endif
+   content::WebContents* web_contents =
+       content::DownloadItemUtils::GetWebContents(item);
+   BrowserWindowInterface* browser =

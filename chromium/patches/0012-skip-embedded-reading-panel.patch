@@ -1,0 +1,46 @@
+diff --git a/chrome/browser/ui/tabs/tab_features.cc b/chrome/browser/ui/tabs/tab_features.cc
+--- a/chrome/browser/ui/tabs/tab_features.cc
++++ b/chrome/browser/ui/tabs/tab_features.cc
+@@ -3,6 +3,8 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/ui/tabs/public/tab_features.h"
++
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
+ 
+ #include <memory>
+ 
+@@ -480,18 +482,21 @@
+   data_protection_tab_controller_ = std::make_unique<
+       enterprise_data_protection::DataProtectionNavigationController>(&tab);
+ 
+-  // Create the ReadAnythingController first to ensure it exists before
+-  // any potential consumers, like the side panel controller.
+-  if (features::IsImmersiveReadAnythingEnabled()) {
+-    read_anything_controller_ =
+-        GetUserDataFactory().CreateInstance<ReadAnythingController>(
+-            tab, &tab, side_panel_registry_.get());
+-  } else {
+-    // TODO(crbug.com/447418049): This will be removed in the future when
+-    // ownership of this controller is migrated to ReadAnythingController.
+-    read_anything_side_panel_controller_ =
+-        std::make_unique<ReadAnythingSidePanelController>(
+-            &tab, side_panel_registry_.get());
++  // Cobble owns its native UI and has no Chrome reading-mode side panel.
++  if (!cobble_chromium::IsEnabled()) {
++    // Create the ReadAnythingController first to ensure it exists before
++    // any potential consumers, like the side panel controller.
++    if (features::IsImmersiveReadAnythingEnabled()) {
++      read_anything_controller_ =
++          GetUserDataFactory().CreateInstance<ReadAnythingController>(
++              tab, &tab, side_panel_registry_.get());
++    } else {
++      // TODO(crbug.com/447418049): This will be removed in the future when
++      // ownership of this controller is migrated to ReadAnythingController.
++      read_anything_side_panel_controller_ =
++          std::make_unique<ReadAnythingSidePanelController>(
++              &tab, side_panel_registry_.get());
++    }
+   }
+ 
+   // Create the HttpAuthCacheStatus to start observing resource load

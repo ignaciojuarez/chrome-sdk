@@ -1,0 +1,50 @@
+diff --git a/chrome/browser/profiles/profile.cc b/chrome/browser/profiles/profile.cc
+index 3704d41..c93236c 100644
+--- a/chrome/browser/profiles/profile.cc
++++ b/chrome/browser/profiles/profile.cc
+@@ -106,6 +106,8 @@ constexpr char kPrimaryOTRProfileID[] = "profile::primary_otr";
+ constexpr char kDevToolsOTRProfileIDPrefix[] = "Devtools::BrowserContext";
+ constexpr char kMediaRouterOTRProfileIDPrefix[] = "MediaRouter::Presentation";
+ constexpr char kTestOTRProfileIDPrefix[] = "Test::OTR";
++constexpr char kCobblePrivateWindowOTRProfileIDPrefix[] =
++    "Cobble::PrivateWindow";
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+ constexpr char kCaptivePortalOTRProfileIDPrefix[] = "CaptivePortal::Signin";
+@@ -124,6 +126,8 @@ bool Profile::OTRProfileID::AllowsBrowserWindows() const {
+   // CaptivePortal::Signin are exceptions to this ban.
+   if (*this == PrimaryID() || IsDevTools() ||
+       base::StartsWith(profile_id_, kMediaRouterOTRProfileIDPrefix,
++                       base::CompareCase::SENSITIVE) ||
++      base::StartsWith(profile_id_, kCobblePrivateWindowOTRProfileIDPrefix,
+                        base::CompareCase::SENSITIVE)) {
+     return true;
+   }
+diff --git a/chrome/browser/ui/browser_manager_service.cc b/chrome/browser/ui/browser_manager_service.cc
+index 3a9c667..f9656d3 100644
+--- a/chrome/browser/ui/browser_manager_service.cc
++++ b/chrome/browser/ui/browser_manager_service.cc
+@@ -20,6 +20,10 @@
+ #include "components/keep_alive_registry/keep_alive_types.h"
+ #include "printing/buildflags/buildflags.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ BrowserManagerService::BrowserManagerService(Profile* profile)
+     : ProfileBrowserCollection(profile) {
+   AddObserver(GlobalBrowserCollection::GetInstance()->GetPlatformDelegate());
+@@ -130,7 +134,11 @@ void BrowserManagerService::DeleteBrowser(Browser* removed_browser) {
+   // instead of separate logic for Incognito and regular profiles.
+   target_browser_and_subscriptions->browser.reset();
+   if (browsers_and_subscriptions_.empty() && profile_->IsIncognitoProfile() &&
+-      !profile_->IsSystemProfile()) {
++      !profile_->IsSystemProfile()
++#if BUILDFLAG(IS_MAC)
++      && !cobble_chromium::HasContextLease(&profile_.get())
++#endif
++  ) {
+ #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+     // The Printing Background Manager holds onto preview dialog WebContents
+     // whose corresponding print jobs have not yet fully spooled. Make sure

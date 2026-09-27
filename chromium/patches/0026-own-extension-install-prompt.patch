@@ -1,0 +1,24 @@
+diff --git a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
+--- a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
++++ b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
+@@ -22,6 +22,10 @@
+ #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
+ #include "chrome/browser/ui/views/chrome_layout_provider.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#include "chrome/browser/ui/cobble/cobble_extension_install_prompt.h"
++#endif
+ #include "chrome/browser/ui/views/chrome_typography.h"
+ #include "chrome/browser/ui/views/extensions/extension_permissions_view.h"
+ #include "chrome/grit/generated_resources.h"
+@@ -730,5 +734,9 @@
+ // static
+ ExtensionInstallPrompt::ShowDialogCallback
+ ExtensionInstallPrompt::GetDefaultShowDialogCallback() {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled())
++    return base::BindRepeating(&cobble_chromium::ShowExtensionInstallPrompt);
++#endif
+   return base::BindRepeating(&ShowExtensionInstallDialogImpl);
+ }

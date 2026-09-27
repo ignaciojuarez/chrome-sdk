@@ -1,0 +1,61 @@
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -109,7 +109,8 @@
+ 
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/ui/cobble/cobble_chromium.h"
++#include "chrome/browser/ui/cobble/cobble_prompts.h"
+ #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
+ #include "ui/display/display.h"
+ #include "ui/display/screen.h"
+ #include "ui/display/types/display_constants.h"
+@@ -1120,6 +1121,10 @@
+ content::JavaScriptDialogManager*
+ BrowserWebContentsDelegate::GetJavaScriptDialogManager(
+     content::WebContents* source) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled())
++    return cobble_chromium::GetJavaScriptDialogManager();
++#endif
+   return javascript_dialogs::TabModalDialogManager::FromWebContents(source);
+ }
+ 
+@@ -1134,6 +1139,11 @@
+     content::RenderFrameHost* render_frame_host,
+     scoped_refptr<content::FileSelectListener> listener,
+     const blink::mojom::FileChooserParams& params) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled() && cobble_chromium::HandleFileChooser(
++          render_frame_host, std::move(listener), params))
++    return;
++#endif
+   FileSelectHelper::RunFileChooser(render_frame_host, std::move(listener),
+                                    params);
+ }
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -573,6 +573,7 @@
+ #include "chrome/browser/ui/browser.h"
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/ui/cobble/cobble_chromium.h"
++#include "chrome/browser/ui/cobble/cobble_prompts.h"
+ #endif
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+@@ -7172,6 +7173,14 @@
+     bool first_auth_attempt,
+     content::GuestPageHolder* guest,
+     content::LoginDelegate::LoginAuthRequiredCallback auth_required_callback) {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return cobble_chromium::CreateLoginDelegate(
++        auth_info, web_contents, request_id,
++        is_request_for_primary_main_frame_navigation, is_request_for_navigation,
++        url, first_auth_attempt, std::move(auth_required_callback));
++  }
++#endif
+ #if BUILDFLAG(IS_CHROMEOS)
+   // Negotiate challenge is handled via GSSAPI library, which can not receive
+   // external credentials. However, on ChromeOS we can suggest the user to
