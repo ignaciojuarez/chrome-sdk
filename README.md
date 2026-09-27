@@ -1,6 +1,6 @@
-# Cobble Chromium SDK
+# Chrome SDK
 
-The Chromium engine used by [Cobble](https://github.com/ignaciojuarez/cobble-browser), a native macOS browser. This repository contains the Swift API, a narrow native bridge, patches against a pinned Chromium release, and an independent test harness. It does **not** contain a Chromium checkout or a prebuilt runtime.
+A native macOS SDK built on Chromium, with a Swift API for embedding the browser engine. Used by [Cobble](https://github.com/ignaciojuarez/cobble-browser). Independent project; not an official Google SDK. This repository contains the Swift API, a narrow native bridge, patches against a pinned Chromium release, and an independent test harness. It does **not** contain a Chromium checkout or a prebuilt runtime.
 
 | | |
 | --- | --- |
