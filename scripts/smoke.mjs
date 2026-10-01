@@ -2301,6 +2301,54 @@ async function main() {
       }
     }
 
+    const popupGestureChecks = [];
+    for (const gesture of [
+      {name: "commandClick", button: "left", modifiers: 4, disposition: 4},
+      {name: "commandShiftClick", button: "left", modifiers: 12, disposition: 3},
+      {name: "middleClick", button: "middle", modifiers: 0, disposition: 4},
+      {name: "shiftMiddleClick", button: "middle", modifiers: 8, disposition: 3},
+      {name: "commandClickTargetBlank", button: "left", modifiers: 4, disposition: 4, target: "_blank"},
+    ]) {
+      const popupURL = `${fixture.pageA}?gesture=${gesture.name}`;
+      const eventCount = JSON.parse(await readFile(popupReportPath, "utf8")).length;
+      const point = await evaluate(cdp, `(() => {
+        document.querySelector('#disposition-link')?.remove();
+        const link = document.createElement('a'); link.id = 'disposition-link';
+        link.href = ${JSON.stringify(popupURL)}; link.target = ${JSON.stringify(gesture.target ?? "")};
+        link.textContent = 'Open disposition fixture';
+        link.style = 'position:fixed;top:10px;left:10px;z-index:99999;background:white;padding:10px';
+        document.body.append(link);
+        const rect = link.getBoundingClientRect();
+        return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+      })()`);
+      await cdp.send("Page.bringToFront");
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await cdp.send("Input.dispatchMouseEvent", {
+          type, ...point, button: gesture.button, modifiers: gesture.modifiers, clickCount: 1,
+        });
+      }
+      const adoption = await poll(`${gesture.name} native callback`, options.timeoutMs, async () => {
+        const records = JSON.parse(await readFile(popupReportPath, "utf8"));
+        return records.length === eventCount + 1 && records.at(-1);
+      });
+      assert(adoption.event === "opened" && adoption.disposition === gesture.disposition,
+        `${gesture.name} lost opening intent: ${JSON.stringify(adoption)}`);
+      assert(await evaluate(cdp, "location.href") === fixture.pageA,
+        `${gesture.name} navigated the opener`);
+      const popupTarget = await poll(`${gesture.name} child load`, options.timeoutMs, async () =>
+        (await fetchJSON(`${devTools.baseURL}/json/list`)).find(item => item.url === popupURL));
+      const popupCDP = new CDPConnection(loopbackWebSocket(popupTarget.webSocketDebuggerUrl, devTools.port));
+      try {
+        await popupCDP.connect(options.timeoutMs);
+        try { await popupCDP.send("Page.close", {}, 2_000); } catch { /* Target may close before replying. */ }
+        await poll(`${gesture.name} child close`, options.timeoutMs, async () => {
+          const records = JSON.parse(await readFile(popupReportPath, "utf8"));
+          return records.length === eventCount + 2 && records.at(-1)?.event === "closed";
+        });
+      } finally { popupCDP.close(); }
+      popupGestureChecks.push({name: gesture.name, disposition: adoption.disposition});
+    }
+
     const blockedPopupURL = `${fixture.pageA}?popupPolicy=block`;
     const popupEventsBeforeBlock = JSON.parse(await readFile(popupReportPath, "utf8")).length;
     await cdp.send("Runtime.evaluate", {
@@ -2851,6 +2899,7 @@ async function main() {
         navigation: true,
         initialDOM: true,
         nativePopups: popupChecks,
+        popupGestures: popupGestureChecks,
         blockedPopup,
         pageMetadata: { faviconMetadata, hoveredMetadata, clearedMetadata },
         permissionPromptDenied: permission,

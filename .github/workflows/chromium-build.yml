@@ -1,0 +1,191 @@
+name: Chromium build
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Upstream validates the build host; SDK includes the embedding overlay
+        required: true
+        default: upstream
+        type: choice
+        options: [upstream, sdk]
+      checkpoint_run:
+        description: Optional prior run ID containing a source/object checkpoint
+        required: false
+        default: ''
+        type: string
+      save_checkpoint:
+        description: Archive and upload the large source/object checkpoint
+        required: false
+        default: false
+        type: boolean
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: chromium-build-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    name: ${{ inputs.variant == 'sdk' && 'Chromium SDK native acceptance' || 'Chromium upstream build' }}
+    runs-on: macos-15
+    timeout-minutes: 355
+    defaults:
+      run:
+        shell: bash
+    env:
+      VARIANT: ${{ inputs.variant }}
+      CHECKPOINT_RUN: ${{ inputs.checkpoint_run }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Make room on the disposable GitHub runner
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          echo "CHROMIUM_WORK=$RUNNER_TEMP/chromium-build" >> "$GITHUB_ENV"
+          test -d /Applications/Xcode_26.3.app
+          sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+          python3 - <<'PY'
+          import pathlib, subprocess
+          keep = pathlib.Path('/Applications/Xcode_26.3.app').resolve()
+          for path in pathlib.Path('/Applications').glob('Xcode*.app'):
+              if not path.is_symlink() and path.resolve() != keep:
+                  subprocess.run(['sudo', 'rm', '-rf', str(path)], check=True)
+          PY
+          sudo xcrun simctl delete all
+          sudo xcrun simctl runtime delete all
+          df -h /
+      - name: Validate source and capacity
+        run: python3 scripts/build.py preflight --work "$CHROMIUM_WORK"
+      - name: Ensure the Xcode Metal toolchain is available
+        timeout-minutes: 30
+        run: |
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun metal --version
+      - name: Download a prior build checkpoint
+        if: inputs.checkpoint_run != ''
+        timeout-minutes: 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$CHECKPOINT_RUN" =~ ^[0-9]+$ ]]
+          gh run download "$CHECKPOINT_RUN" --name chromium-build-checkpoint --dir "$RUNNER_TEMP/checkpoint"
+      - name: Extract and validate the build checkpoint
+        if: inputs.checkpoint_run != ''
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cmp chromium.lock.json "$RUNNER_TEMP/checkpoint/chromium.lock.json"
+          tar -xf "$RUNNER_TEMP/checkpoint/checkpoint.tar.zst" -C "$CHROMIUM_WORK"
+          rm "$RUNNER_TEMP/checkpoint/checkpoint.tar.zst"
+          previous_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CHECKPOINT_RUN" --jq .head_sha)
+          [[ "$previous_sha" =~ ^[0-9a-f]{40}$ ]]
+          mkdir -p "$RUNNER_TEMP/previous-sdk"
+          gh api "repos/$GITHUB_REPOSITORY/tarball/$previous_sha" > "$RUNNER_TEMP/previous-sdk.tar.gz"
+          tar -xzf "$RUNNER_TEMP/previous-sdk.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/previous-sdk"
+          rm "$RUNNER_TEMP/previous-sdk.tar.gz"
+      - name: Record compiler diagnostic provenance
+        run: |
+          mkdir -p "$RUNNER_TEMP/chromium-logs"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          context = {
+              "schema": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "sdk_revision": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "workflow": ".github/workflows/chromium-build.yml",
+              "variant": os.environ["VARIANT"],
+          }
+          path = Path(os.environ["RUNNER_TEMP"]) / "chromium-logs/build-context.json"
+          path.write_text(json.dumps(context, indent=2) + "\n")
+          PY
+      - name: Fetch locked Chromium and dependencies
+        id: fetch
+        run: |
+          options=()
+          if [[ -n "$CHECKPOINT_RUN" && "$VARIANT" = sdk ]]; then
+            options+=(--replace-sdk --previous-sdk "$RUNNER_TEMP/previous-sdk")
+          fi
+          python3 scripts/build.py prepare --work "$CHROMIUM_WORK" "${options[@]}" 2>&1 | tee "$RUNNER_TEMP/chromium-logs/prepare.log"
+      - name: Configure full Chrome target
+        id: configure
+        run: python3 scripts/build.py configure --work "$CHROMIUM_WORK" --variant "$VARIANT" 2>&1 | tee "$RUNNER_TEMP/chromium-logs/configure.log"
+      - name: Compile SDK bridge objects first
+        id: probe
+        if: inputs.variant == 'sdk'
+        run: |
+          mkdir -p "$RUNNER_TEMP/chromium-logs"
+          python3 scripts/build.py probe --work "$CHROMIUM_WORK" --variant sdk --jobs 3 --compile-minutes 40 2>&1 | tee "$RUNNER_TEMP/chromium-logs/probe.log"
+      - name: Build full Chrome target
+        id: compile
+        run: |
+          mkdir -p "$RUNNER_TEMP/chromium-logs"
+          python3 scripts/build.py compile --work "$CHROMIUM_WORK" --variant "$VARIANT" --jobs 3 2>&1 | tee "$RUNNER_TEMP/chromium-logs/compile.log"
+      - name: Preserve failed source and compiler diagnostics before checkpointing
+        if: failure() && (steps.fetch.outcome == 'failure' || steps.configure.outcome == 'failure' || steps.probe.outcome == 'failure' || steps.compile.outcome == 'failure')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chromium-compiler-logs
+          path: |
+            ${{ runner.temp }}/chromium-logs/
+            ${{ env.CHROMIUM_WORK }}/src/out/Upstream/siso.INFO
+          if-no-files-found: error
+          retention-days: 7
+      - name: Package unsigned validation artifact
+        id: package
+        run: python3 scripts/build.py package --work "$CHROMIUM_WORK" --variant "$VARIANT"
+      - name: Prepare native smoke artifacts
+        if: inputs.variant == 'sdk'
+        run: mkdir -p artifacts/native-smoke
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: inputs.variant == 'sdk'
+        with:
+          node-version: '22'
+      - name: Assemble and smoke-test the SDK harness
+        id: native_smoke
+        if: inputs.variant == 'sdk'
+        timeout-minutes: 10
+        run: |
+          sdk_chromium_app=$(cd scripts && python3 -c \
+            'import os; from pathlib import Path; from build import build_directory; print(build_directory(Path(os.environ["CHROMIUM_WORK"])) / "Chromium.app")')
+          python3 scripts/assemble_harness.py "$sdk_chromium_app" \
+            --output "$RUNNER_TEMP/Cobble Chromium Harness.app" \
+            2>&1 | tee artifacts/native-smoke/assemble.log
+          node scripts/smoke.mjs "$RUNNER_TEMP/Cobble Chromium Harness.app" \
+            --artifacts artifacts/native-smoke --timeout-ms 60000 \
+            2>&1 | tee artifacts/native-smoke/workflow.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && inputs.variant == 'sdk' && steps.package.outcome == 'success'
+        with:
+          name: chromium-native-smoke
+          path: artifacts/native-smoke/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chromium-${{ inputs.variant }}-arm64
+          path: |
+            artifacts/*.zip
+            artifacts/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Save source and object files for an incremental build
+        if: always() && inputs.save_checkpoint && steps.fetch.outcome == 'success'
+        run: |
+          mkdir -p "$RUNNER_TEMP/checkpoint"
+          cp chromium.lock.json "$RUNNER_TEMP/checkpoint/chromium.lock.json"
+          tar -C "$CHROMIUM_WORK" -cf - . | zstd -T2 -3 -o "$RUNNER_TEMP/checkpoint/checkpoint.tar.zst"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && inputs.save_checkpoint && steps.fetch.outcome == 'success'
+        with:
+          name: chromium-build-checkpoint
+          path: ${{ runner.temp }}/checkpoint/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3

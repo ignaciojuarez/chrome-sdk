@@ -209,12 +209,15 @@ struct CCSMediaPermissionRequest {
 };
 
 struct PendingPopup final : public content::WebContentsObserver {
-  PendingPopup(base::WeakPtr<CCSPage> opener, content::WebContents* contents)
-      : content::WebContentsObserver(contents), opener(std::move(opener)) {}
+  PendingPopup(base::WeakPtr<CCSPage> opener, content::WebContents* contents,
+               WindowOpenDisposition disposition)
+      : content::WebContentsObserver(contents),
+        opener(std::move(opener)), disposition(disposition) {}
   void StopObserving() { Observe(nullptr); }
   void WebContentsDestroyed() override;
 
   base::WeakPtr<CCSPage> opener;
+  const WindowOpenDisposition disposition;
   base::WeakPtrFactory<PendingPopup> weak_factory{this};
 };
 
@@ -564,17 +567,24 @@ CCSPage* WrapPage(Browser* browser, content::WebContents* contents) {
 }
 
 void DeliverPendingPopup(base::WeakPtr<CCSPage> opener,
-                         base::WeakPtr<CCSPage> popup) {
+                         base::WeakPtr<CCSPage> popup,
+                         WindowOpenDisposition disposition) {
   if (!popup) {
     return;
   }
   const bool opener_is_live = opener && !opener->closed && !opener->released;
   if (!State().stopping && !popup->closed && opener_is_live &&
-      State().client.popup_created) {
+      (State().client.popup_created_with_disposition ||
+       State().client.popup_created)) {
     popup->released = false;
-    State().client.popup_created(State().client.user_data, opener.get(),
-                                 popup.get(),
-                                 popup->host_window_id.c_str());
+    if (State().client.popup_created_with_disposition) {
+      State().client.popup_created_with_disposition(
+          State().client.user_data, opener.get(), popup.get(),
+          popup->host_window_id.c_str(), static_cast<int32_t>(disposition));
+    } else {
+      State().client.popup_created(State().client.user_data, opener.get(),
+                                   popup.get(), popup->host_window_id.c_str());
+    }
     if (popup) {
       popup->SendState();
     }
@@ -1171,7 +1181,17 @@ void CCSPage::DidOpenRequestedURL(
     bool renderer_initiated) {
   if (new_contents && !released && !closed) {
     State().pending_popups.push_back(
-        std::make_unique<PendingPopup>(weak_factory.GetWeakPtr(), new_contents));
+        std::make_unique<PendingPopup>(weak_factory.GetWeakPtr(), new_contents,
+                                       disposition));
+    // OpenURLFromTab inserts ordinary modified links before this observer runs.
+    // Window.open instead registers the child before tab-strip insertion.
+    for (const auto& entry : State().browsers) {
+      if (entry.browser->tab_strip_model()->GetIndexOfWebContents(new_contents) !=
+          TabStripModel::kNoTab) {
+        cobble_chromium::BrowserTabStripChanged(entry.browser);
+        break;
+      }
+    }
   }
 }
 
@@ -1978,6 +1998,7 @@ void BrowserTabStripChanged(Browser* browser) {
   for (size_t index = 0; index < pending_popups.size();) {
     content::WebContents* contents = pending_popups[index]->web_contents();
     base::WeakPtr<CCSPage> opener = pending_popups[index]->opener;
+    const auto disposition = pending_popups[index]->disposition;
     if (browser->tab_strip_model()->GetIndexOfWebContents(contents) ==
         TabStripModel::kNoTab) {
       ++index;
@@ -1995,7 +2016,7 @@ void BrowserTabStripChanged(Browser* browser) {
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(&DeliverPendingPopup, std::move(opener),
-                       popup->weak_factory.GetWeakPtr()));
+                       popup->weak_factory.GetWeakPtr(), disposition));
   }
 }
 

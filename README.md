@@ -1,15 +1,34 @@
 # Chrome SDK
 
-A native macOS SDK built on Chromium, with a Swift API for embedding the browser engine. Used by [Cobble](https://github.com/ignaciojuarez/cobble-browser). Independent project; not an official Google SDK. This repository contains the Swift API, a narrow native bridge, patches against a pinned Chromium release, and an independent test harness. It does **not** contain a Chromium checkout or a prebuilt runtime.
+A native macOS SDK built on Chromium, with a Swift API for embedding the browser engine. Used by [Cobble](https://github.com/ignaciojuarez/cobble-browser). Independent project; not an official Google SDK. This repository contains the Swift API, a narrow native bridge, patches against a pinned Chromium release, and an independent test harness. It does **not** contain a Chromium checkout. Matched development runtimes are published as immutable GitHub Release assets; they are not release-qualified app downloads.
 
 | | |
 | --- | --- |
+| ABI | 17 |
 | Engine | Chromium 153.0.8010.37, pinned in [`chromium.lock.json`](chromium.lock.json) |
 | Platform | Apple Silicon macOS |
 | Source | Swift 6, Objective-C++, C++, Python |
 | Status | Development build; no release signing or notarization |
 
 The app embeds Chromium's real framework, helpers, and resources. The Swift package alone does not render pages. Cobble also builds separately with WebKit.
+
+## Development workflow
+
+This public repository is the source of truth. Work on branches or temporary
+worktrees here; the former private SDK repository is archived. Cobble pins an
+exact SDK commit, and Full packaging requires that commit’s matched runtime,
+ABI, source lock and native-payload hashes. Keep one incremental Chromium work
+directory outside Git. Keep packaged runtimes outside the source checkout and
+retain one rollback runtime instead of copying source/build trees.
+
+ABI 17 adds `ChromiumRuntime.onPopupWithDisposition`, delivering the created
+child’s exact opening intent. Command-click and middle-click children can stay
+in the background; ordinary popups and Shift-modified children activate. The
+legacy `onPopup` callback remains available for hosts that always activate.
+
+Lightweight source and Swift checks run in CI. Chromium-update discovery opens
+a review proposal; native builds remain manual, and checkpoint uploads default
+to off. A lock update alone never qualifies or publishes a runtime.
 
 ## Build
 

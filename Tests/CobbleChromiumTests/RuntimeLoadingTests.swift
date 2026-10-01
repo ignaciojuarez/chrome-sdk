@@ -172,6 +172,36 @@ nonisolated(unsafe) private var identityUnregisterCount = 0
         let page: ChromiumPage
     }
 
+    func testCreatedPopupCarriesItsOwnDispositionAndKeepsLegacyCallback() async throws {
+        let fixture = try await makePromptFixture()
+        let hostID = UUID()
+        var received: [(OpaquePointer, ChromiumPopupRequest.Disposition)] = []
+        fixture.runtime.onPopupWithDisposition = { opener, child, disposition in
+            XCTAssertTrue(opener === fixture.page)
+            XCTAssertTrue(child.context === fixture.page.context)
+            XCTAssertEqual(child.hostWindowID, hostID)
+            received.append((child.handle, disposition))
+        }
+        let rawValues: [Int32] = [4, 3, 6, 5, 999]
+        for (index, rawValue) in rawValues.enumerated() {
+            let child = OpaquePointer(bitPattern: 0x30 + index)!
+            hostID.uuidString.withCString {
+                fixture.client.popup_created_with_disposition?(
+                    fixture.client.user_data, fixture.page.handle, child, $0, rawValue)
+            }
+            XCTAssertEqual(received.last?.0, child)
+        }
+        XCTAssertEqual(received.map { $0.1 }, [.newBackgroundTab, .newForegroundTab, .newWindow, .newPopup, .unknown])
+        fixture.runtime.onPopupWithDisposition = nil
+        var legacyCount = 0
+        fixture.runtime.onPopup = { _, _ in legacyCount += 1 }
+        hostID.uuidString.withCString {
+            fixture.client.popup_created_with_disposition?(
+                fixture.client.user_data, fixture.page.handle, OpaquePointer(bitPattern: 0x40), $0, 3)
+        }
+        XCTAssertEqual(legacyCount, 1)
+    }
+
     private func makePromptFixture() async throws -> PromptFixture {
         stubPageView = NSView()
         var api = CCSAPI()

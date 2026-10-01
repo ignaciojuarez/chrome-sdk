@@ -1,0 +1,56 @@
+name: Propose Chromium update
+on:
+  schedule:
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+concurrency:
+  group: chromium-version-discovery
+  cancel-in-progress: false
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: python3 -m unittest discover -s Tests -p 'test_*.py'
+      - run: python3 scripts/update.py --write
+      - name: Open a review branch for a verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- chromium.lock.json; then exit 0; fi
+          version=$(python3 -c 'import json; print(json.load(open("chromium.lock.json"))["version"])')
+          branch="update/chromium-$version"
+          states=$(gh pr list --state all --base main --head "$branch" --limit 100 --json state --jq '.[].state')
+          if grep -qx OPEN <<< "$states"; then
+            echo "An open update PR already exists for $version"
+            exit 0
+          fi
+          if [[ -n "$states" ]]; then
+            echo "A prior update PR for $version was closed or merged; leaving that decision intact"
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin "$branch"; then
+            git fetch --no-tags origin "$branch"
+            git show FETCH_HEAD:chromium.lock.json > "$RUNNER_TEMP/remote-lock.json"
+            cmp chromium.lock.json "$RUNNER_TEMP/remote-lock.json"
+          else
+            git switch -c "$branch"
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add chromium.lock.json
+            git commit -m "Update Chromium source pin to $version"
+            git push origin "$branch"
+          fi
+          cat > "$RUNNER_TEMP/update-body.md" <<'BODY'
+          Updates the source lock to a published stable Mac release whose official Git tag matches its revision.
+
+          Before merging: rebase the embedding patch, manually dispatch `chromium-build.yml` with `variant=sdk` on this branch, require its successful `Chromium SDK native acceptance` result on the exact latest commit, and review security changes. That check builds the full runtime and runs the native harness/privacy/extension smoke suite; upstream-host and Swift-only checks cannot replace it. Large source/object checkpoint upload is opt-in with `save_checkpoint=true`; use it only when the build must be resumed. This PR does not publish a runtime. Optional AI repair is available through `scripts/repair.py` on this update branch.
+          BODY
+          gh pr create --draft --base main --head "$branch" --title "Update Chromium to $version" --body-file "$RUNNER_TEMP/update-body.md"
+          # GITHUB_TOKEN pushes and PRs do not trigger the normal checks workflow.
+          gh workflow run checks.yml --ref "$branch"
