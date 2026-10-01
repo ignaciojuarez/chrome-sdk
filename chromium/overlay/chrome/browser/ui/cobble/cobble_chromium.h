@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define CCS_ABI_VERSION 16u
+#define CCS_ABI_VERSION 17u
 // Chromium compiles with hidden visibility; the client resolves this ABI by name.
 #define CCS_EXPORT __attribute__((visibility("default")))
 
@@ -363,6 +363,13 @@ typedef struct CCSClientV12 {
   void (*extension_install_cancelled)(
       void* user_data, CCSExtensionInstallRequestRef request,
       uint64_t request_id);
+  // ABI 17: exact child opening intent, retained across deferred adoption.
+  // Preferred over popup_created when supplied.
+  void (*popup_created_with_disposition)(void* user_data,
+                                         CCSPageRef opener,
+                                         CCSPageRef popup,
+                                         const char* host_window_id_utf8,
+                                         int32_t disposition);
 } CCSClientV12;
 
 // Outer-app client entry point. The patched Chromium browser launcher requires

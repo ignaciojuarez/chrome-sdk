@@ -1,0 +1,17 @@
+name: Build host preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Inspect available build resources
+        run: |
+          uname -m
+          xcodebuild -version
+          df -h /
+          sysctl hw.memsize hw.ncpu
+          du -sh /Applications/Xcode*.app /Library/Developer/CoreSimulator /Users/runner/hostedtoolcache 2>/dev/null || true

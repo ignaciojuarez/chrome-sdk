@@ -76,6 +76,8 @@ public struct ChromiumExtensionInstallRequest {
     public var onReopen: (() -> Void)?
     public var onOpenURLs: (([URL]) -> Void)?
     public var onPopup: ((ChromiumPage?, ChromiumPage) -> Void)?
+    /// Opening intent from the exact created child, independent of popup policy.
+    public var onPopupWithDisposition: ((ChromiumPage?, ChromiumPage, ChromiumPopupRequest.Disposition) -> Void)?
     public var popupPolicy: ((ChromiumPopupRequest) -> Bool)?
     public var onMediaPermissionRequest: ((ChromiumMediaPermissionRequest) -> Void)?
     public var onJavaScriptDialog: ((ChromiumJavaScriptDialogRequest) -> Void)?
@@ -293,7 +295,7 @@ public struct ChromiumExtensionInstallRequest {
                 runtime.pages[handle]?.updateFind(result.pointee)
             }
         }
-        client.popup_created = { data, opener, child, hostWindowID in
+        client.popup_created_with_disposition = { data, opener, child, hostWindowID, disposition in
             MainActor.assumeIsolated {
                 guard let data, let child else { return }
                 let runtime = Unmanaged<ChromiumRuntime>.fromOpaque(data).takeUnretainedValue()
@@ -308,7 +310,9 @@ public struct ChromiumExtensionInstallRequest {
                         return
                     }
                     let page = try runtime.wrap(child, context: parent.context, hostWindowID: hostID)
-                    if let callback = runtime.onPopup { callback(parent, page) }
+                    if let callback = runtime.onPopupWithDisposition {
+                        callback(parent, page, ChromiumPopupRequest.Disposition(rawValue: disposition) ?? .unknown)
+                    } else if let callback = runtime.onPopup { callback(parent, page) }
                     else { runtime.forceCloseUnpresentedPage(page) }
                 } catch { runtime.retireUnhostedPage(child) }
             }

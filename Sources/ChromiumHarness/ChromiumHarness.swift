@@ -51,9 +51,9 @@ public func CCSClientMain(_ launcherFrameworkHandle: UnsafeMutableRawPointer?) -
         runtime.onReady = { [weak self] in self?.start() }
         runtime.onWillStop = { [weak self] in self?.stop() }
         runtime.popupPolicy = { [weak self] request in self?.approvePopup(request) ?? false }
-        runtime.onPopup = { [weak self] opener, page in
+        runtime.onPopupWithDisposition = { [weak self] opener, page, disposition in
             guard let self, let opener else { page.forceClose(); return }
-            showInNewWindow(page, opener: opener)
+            showInNewWindow(page, opener: opener, disposition: disposition)
         }
         runtime.onDownload = { [weak self] page, download in
             self?.receive(download, from: page)
@@ -136,7 +136,8 @@ public func CCSClientMain(_ launcherFrameworkHandle: UnsafeMutableRawPointer?) -
         }
     }
 
-    private func showInNewWindow(_ page: ChromiumPage, opener: ChromiumPage) {
+    private func showInNewWindow(_ page: ChromiumPage, opener: ChromiumPage,
+                                 disposition: ChromiumPopupRequest.Disposition) {
         let policyApproved = approvedPopupCount > 0
         if policyApproved { approvedPopupCount -= 1 }
         let hostID = UUID()
@@ -148,6 +149,7 @@ public func CCSClientMain(_ launcherFrameworkHandle: UnsafeMutableRawPointer?) -
             popupHosts.insert(hostID)
             recordPopupEvent([
                 "event": "opened", "hostID": hostID.uuidString,
+                "disposition": disposition.rawValue,
                 "openerHostID": opener.hostWindowID.uuidString,
                 "nativeViewAttached": page.nativeView.window === window,
                 "separateNativeWindow": hostWindows[opener.hostWindowID].map { $0 !== window } ?? false,
@@ -312,7 +314,7 @@ public func CCSClientMain(_ launcherFrameworkHandle: UnsafeMutableRawPointer?) -
         runtime.onReady = nil
         runtime.onWillStop = nil
         runtime.popupPolicy = nil
-        runtime.onPopup = nil
+        runtime.onPopupWithDisposition = nil
         runtime.onDownload = nil
         runtime.hostWindow = nil
         runtime.onReopen = nil

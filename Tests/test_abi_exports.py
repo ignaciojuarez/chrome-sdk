@@ -80,7 +80,7 @@ class ABIExportTests(unittest.TestCase):
 
     def test_post_reload_is_deferred_for_owned_confirmation(self):
         header = (ROOT / "chromium/overlay/chrome/browser/ui/cobble/cobble_chromium.h").read_text()
-        self.assertIn("#define CCS_ABI_VERSION 16u", header)
+        self.assertIn("#define CCS_ABI_VERSION 17u", header)
         self.assertIn("CCS_JAVASCRIPT_DIALOG_FORM_REPOST = 4", header)
 
         prompts = (ROOT / "chromium/overlay/chrome/browser/ui/cobble/cobble_prompts.mm").read_text()
