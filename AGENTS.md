@@ -22,4 +22,3 @@ identifiers and unredacted logs/evidence. Use synthetic fixtures, placeholders,
 ignored local configuration and Keychain instead. Preserve useful source/docs
 when porting work; check every changed and new file against the destination.
 `.gitignore` and automated scans do not replace this content review.
-
