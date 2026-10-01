@@ -1,0 +1,15 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Swift tests",
+      "command": "swift test",
+      "icon": "build"
+    },
+    {
+      "name": "Source checks",
+      "command": "python3 -m unittest discover -s Tests -p 'test_*.py' && node Tests/test_smoke_fixture.mjs",
+      "icon": "build"
+    }
+  ]
+}
