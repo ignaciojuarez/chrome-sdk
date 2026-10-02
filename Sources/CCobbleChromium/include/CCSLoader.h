@@ -9,7 +9,8 @@
 #include "../../../chromium/overlay/chrome/browser/ui/cobble/cobble_website_data.h"
 
 typedef struct CCSAPI {
-  int32_t (*set_client)(const CCSClientV12*);
+  uint8_t (*get_runtime_info)(CCSRuntimeInfoV1*);
+  int32_t (*set_client)(const CCSClientV13*);
   void (*request_quit)(uint8_t);
   void (*cancel_quit)(void);
   CCSContextRef (*default_context)(void);
@@ -22,6 +23,8 @@ typedef struct CCSAPI {
   void (*page_load_url)(CCSPageRef, const char*);
   void (*page_go_back)(CCSPageRef);
   void (*page_go_forward)(CCSPageRef);
+  void (*page_copy_navigation_history_json)(CCSPageRef, void*, CCSPageDataCallback);
+  uint8_t (*page_go_to_history_entry)(CCSPageRef, int32_t);
   uint8_t (*page_reload)(CCSPageRef);
   uint8_t (*page_reload_from_origin)(CCSPageRef);
   void (*page_stop)(CCSPageRef);
@@ -29,6 +32,8 @@ typedef struct CCSAPI {
   void (*page_set_visible)(CCSPageRef, uint8_t);
   uint8_t (*page_move_to_host)(CCSPageRef, const char*);
   int32_t (*page_find)(CCSPageRef, const char*, uint8_t);
+  int32_t (*page_find_with_options)(CCSPageRef, const char*, uint32_t);
+  void (*page_copy_initial_find_text)(CCSPageRef, void*, CCSPageDataCallback);
   double (*page_get_zoom_factor)(CCSPageRef);
   uint8_t (*page_set_zoom_factor)(CCSPageRef, double);
   uint8_t (*page_print)(CCSPageRef);

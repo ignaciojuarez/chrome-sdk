@@ -388,6 +388,14 @@ enum HarnessValidation {
 
         do {
             guard runtime.isReady else { throw ValidationError("Chromium was not ready.") }
+            let runtimeInfo = try runtime.runtimeInfo()
+            checks["runtimeVersionAvailable"] = runtimeInfo.abiVersion == 18 &&
+                runtimeInfo.chromiumVersion == Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString") as? String &&
+                !runtimeInfo.chromiumRevision.isEmpty
+            checks["emptyPrivateWindowKeyRejected"] = await rejectsOperation {
+                _ = try await runtime.openContext(profileKey: "harness-validation", privateWindowKey: "")
+            }
             checks["nulProfileKeyRejected"] = await rejectsProfileKey {
                 _ = try await runtime.openContext(profileKey: "harness\u{0}alias")
             }
@@ -499,6 +507,8 @@ enum HarnessValidation {
             showPage?(validationPage)
             try await waitForStableTitle(for: validationPage, url: configuration.extensionTarget,
                                          title: configuration.baselineTitle)
+            checks.merge(try await HarnessPageValidation.run(page: validationPage,
+                baseline: configuration.extensionTarget)) { _, new in new }
             checks["withheldBeforeGrant"] = validationPage.title == configuration.baselineTitle
             try await waitForCondition("native HTTP connection state") {
                 validationPage.connection == .insecure
@@ -1187,6 +1197,9 @@ enum HarnessValidation {
             try await waitForCondition("inspected target crash closes DevTools") {
                 targetCrashTools.isClosed && targetCrashToolsCloseCount == 1
             }
+            checks["rendererTerminationReasonAvailable"] =
+                crashPage.rendererTerminationStatus != nil && !crashPage.isDocumentReady &&
+                !crashPage.isUnresponsive
             checks["rendererCrashFileChooserCancelledOnce"] =
                 crashChooser?.select([selectedFile]) == false
             checks["devToolsTargetCrashClosesOnce"] = targetCrashTools.isClosed &&

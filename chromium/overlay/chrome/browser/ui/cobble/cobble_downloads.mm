@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/auto_reset.h"
 #include "base/check.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
@@ -124,10 +125,12 @@ struct CCSDownload final : public download::DownloadItem::Observer {
     CCSPageRef page = cobble_chromium::PageForWebContents(
         content::DownloadItemUtils::GetWebContents(item_));
     const std::string filename = suggested_path.BaseName().AsUTF8Unsafe();
-    in_client_callback_ = true;
-    const bool handled = page && cobble_chromium::NotifyDownloadCreated(
-                                     page, this, filename.c_str());
-    in_client_callback_ = false;
+    bool handled = false;
+    {
+      base::AutoReset<bool> callback_guard(&in_client_callback_, true);
+      handled = page && cobble_chromium::NotifyDownloadCreated(
+                            page, this, filename.c_str());
+    }
     if (!handled) {
       client_released_ = true;
       Cancel(nullptr, nullptr);
@@ -306,16 +309,7 @@ struct CCSDownload final : public download::DownloadItem::Observer {
     }
     interruption_reported_ = true;
     terminal_error_ = FailureMessage(item_);
-    const CCSDownloadStateV1 state = {
-        .struct_size = sizeof(CCSDownloadStateV1),
-        .received_bytes = item_->GetReceivedBytes(),
-        .total_bytes = item_->GetTotalBytes(),
-        .status = CCS_DOWNLOAD_FAILED,
-        .error_utf8 = terminal_error_.c_str(),
-    };
-    in_client_callback_ = true;
-    cobble_chromium::NotifyDownloadStateChanged(this, &state);
-    in_client_callback_ = false;
+    SendState(CCS_DOWNLOAD_FAILED, terminal_error_.c_str());
     MaybeDelete();
   }
 
@@ -339,16 +333,7 @@ struct CCSDownload final : public download::DownloadItem::Observer {
     if (client_released_ || !item_) {
       return;
     }
-    const CCSDownloadStateV1 state = {
-        .struct_size = sizeof(CCSDownloadStateV1),
-        .received_bytes = item_->GetReceivedBytes(),
-        .total_bytes = item_->GetTotalBytes(),
-        .status = CCS_DOWNLOAD_IN_PROGRESS,
-        .error_utf8 = nullptr,
-    };
-    in_client_callback_ = true;
-    cobble_chromium::NotifyDownloadStateChanged(this, &state);
-    in_client_callback_ = false;
+    SendState(CCS_DOWNLOAD_IN_PROGRESS);
     MaybeDelete();
   }
 
@@ -398,31 +383,44 @@ struct CCSDownload final : public download::DownloadItem::Observer {
     CompleteCancelRequests();
     if (!client_released_ && !(explicit_cancel_ &&
                                terminal_status_ == CCS_DOWNLOAD_CANCELLED)) {
-      const CCSDownloadStateV1 state = {
-          .struct_size = sizeof(CCSDownloadStateV1),
-          .received_bytes = item_ ? item_->GetReceivedBytes() : 0,
-          .total_bytes = item_ ? item_->GetTotalBytes() : 0,
-          .status = terminal_status_,
-          .error_utf8 = terminal_status_ == CCS_DOWNLOAD_FAILED &&
-                                !terminal_error_.empty()
-                            ? terminal_error_.c_str()
-                            : nullptr,
-      };
-      in_client_callback_ = true;
-      cobble_chromium::NotifyDownloadStateChanged(this, &state);
-      in_client_callback_ = false;
+      SendState(terminal_status_, terminal_status_ == CCS_DOWNLOAD_FAILED
+                                      ? terminal_error_.c_str() : nullptr);
     }
     MaybeDelete();
   }
 
+  void SendState(CCSDownloadStatus status, const char* error = nullptr) {
+    // Local copies keep borrowed wire strings stable even if the client
+    // synchronously resumes, cancels or releases the download in its callback.
+    const std::string original = item_ ? item_->GetOriginalUrl().spec() : "";
+    const std::string current = item_ ? item_->GetURL().spec() : "";
+    const std::string mime = item_ ? item_->GetMimeType() : "";
+    const std::string message = error ? error : "";
+    const CCSDownloadStateV2 state = {
+        .struct_size = sizeof(CCSDownloadStateV2),
+        .received_bytes = item_ ? item_->GetReceivedBytes() : 0,
+        .total_bytes = item_ ? item_->GetTotalBytes() : 0,
+        .status = status,
+        .error_utf8 = message.empty() ? nullptr : message.c_str(),
+        .original_url_utf8 = original.c_str(),
+        .current_url_utf8 = current.c_str(),
+        .mime_type_utf8 = mime.c_str(),
+        .interrupt_reason = status == CCS_DOWNLOAD_FAILED && item_
+                                ? static_cast<int32_t>(item_->GetLastReason()) : 0,
+    };
+    base::AutoReset<bool> callback_guard(&in_client_callback_, true);
+    cobble_chromium::NotifyDownloadStateChanged(this, &state);
+  }
+
   void CompleteCancelRequests() {
-    in_client_callback_ = true;
+    // Restore the outer callback's guard after nested AppKit event processing.
+    // A plain false assignment would let DeleteSoon retire an active frame.
+    base::AutoReset<bool> callback_guard(&in_client_callback_, true);
     auto requests = std::move(cancel_requests_);
     cancel_requests_.clear();
     for (auto& request : requests) {
       request->Complete();
     }
-    in_client_callback_ = false;
   }
 
   void MaybeDelete() {

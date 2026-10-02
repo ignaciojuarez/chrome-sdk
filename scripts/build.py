@@ -6,7 +6,6 @@ The upstream stage produces stock Chromium; it is not an SDK release.
 """
 import argparse
 import hashlib
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -19,7 +18,8 @@ import sys
 import time
 import urllib.request
 
-from apply_chromium import validate_checkout, validate_installed_files
+from apply_chromium import (apply, build_lock, validate_checkout,
+                            validate_installed_files, validate_patch_series)
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "https://chromium.googlesource.com/chromium/src.git"
@@ -230,11 +230,8 @@ def prepare(work, lock, replace_sdk=False, previous_sdk=None):
     if (work / "src" / ".cobble-chromium-sdk.json").exists():
         # Verify our exact installed patch/overlay bytes before reusing an SDK
         # checkpoint. Never reset a patched source tree behind the caller.
-        command = [sys.executable, ROOT / "scripts" / "apply_chromium.py", work / "src"]
-        if replace_sdk:
-            command.append("--replace")
-            if previous_sdk: command.extend(["--previous-sdk", previous_sdk])
-        run(command)
+        apply(work / "src", sdk_root=ROOT, replace=replace_sdk,
+              previous_sdk=previous_sdk)
         if not (work / ".gclient_entries").is_file():
             raise ValueError("Patched checkpoint lacks dependency records; use a fresh checkout")
     else:
@@ -257,6 +254,8 @@ def sdk_build_inputs(work):
     payload = native_payload()
     validate_sdk_source(work / "src", payload)
     validate_installed_files(work / "src", payload["overlay"])
+    validate_patch_series(work / "src", sorted((ROOT / "chromium/patches").glob("*.patch")),
+                          compare_worktree=True)
     validate_sdk_exports(work / "src")
     validate_sdk_history_policy(work / "src")
     return {"lock": lock, "native_payload": payload,
@@ -313,7 +312,7 @@ def configure(work, variant):
         patch_script = ROOT / "scripts" / "apply_chromium.py"
         if not patch_script.is_file():
             raise ValueError("SDK overlay has not been implemented; use upstream for build-host validation")
-        run([sys.executable, patch_script, source])
+        apply(source, sdk_root=ROOT)
         validate_sdk_source(source, native_payload())
         validate_sdk_exports(source)
         validate_sdk_history_policy(source)
@@ -332,11 +331,24 @@ def configure(work, variant):
     run(["gn", "gen", output], cwd=source, env=build_environment(work))
 
 
+def probe_targets(listing, root=ROOT):
+    sources = root / "chromium/overlay/chrome/browser/ui/cobble"
+    expected = {path.stem + ".o" for path in sources.iterdir()
+                if path.suffix in {".mm", ".cc", ".c"}}
+    targets = [line.split(":", 1)[0] for line in listing.splitlines()
+               if Path(line.split(":", 1)[0]).name in expected]
+    found = {Path(target).name for target in targets}
+    if not expected or found != expected or len(targets) != len(expected):
+        raise ValueError("Native SDK object targets are missing or ambiguous: "
+                         + ", ".join(sorted(expected - found)))
+    return sorted(targets)
+
+
 def compile_chrome(work, variant, jobs, minutes, probe=False):
     source = work / "src"
     output = build_directory(work)
-    expected_inputs = sdk_build_inputs(work) if variant == "sdk" and not probe else None
-    if expected_inputs:
+    expected_inputs = sdk_build_inputs(work) if variant == "sdk" else None
+    if expected_inputs and not probe:
         (output / BUILD_RECEIPT).unlink(missing_ok=True)
     targets = ["chrome"]
     if probe:
@@ -346,10 +358,7 @@ def compile_chrome(work, variant, jobs, minutes, probe=False):
             cwd=source, env=build_environment(work))
         listing = run(["ninja", "-C", output, "-t", "targets", "all"],
                       cwd=source, env=build_environment(work), capture=True)
-        targets = [line.split(":", 1)[0] for line in listing.splitlines()
-                   if re.search(r"/cobble_(chromium|browser_window|client_certificates|devtools|downloads|extension_install_prompt|extensions|identity|local_file|page_operations|profile_deletion|prompts|website_data)\.o:", line)]
-        if len(targets) != 13:
-            raise ValueError("Expected thirteen native SDK object targets; inspect the generated Ninja graph")
+        targets = probe_targets(listing)
     command = ["autoninja", "-C", str(output)]
     if probe:
         command.extend(["-k", "0"])
@@ -380,16 +389,22 @@ def compile_chrome(work, variant, jobs, minutes, probe=False):
     if status:
         raise subprocess.CalledProcessError(status, command)
     if expected_inputs:
-        record_sdk_build(work, expected_inputs)
+        if probe:
+            if sdk_build_inputs(work) != expected_inputs:
+                raise ValueError("SDK inputs changed during the native probe")
+        else:
+            record_sdk_build(work, expected_inputs)
 
 
-def package(work, variant, lock):
+def package(work, variant, lock, artifacts=None):
     output = build_directory(work)
     app = output / "Chromium.app"
     executable = app / "Contents" / "MacOS" / "Chromium"
     if not executable.is_file():
         raise ValueError("No built Chromium executable exists")
     embedded = None
+    artifacts = Path(artifacts) if artifacts is not None else ROOT / "artifacts"
+    name = f"{'cobble-sdk' if variant == 'sdk' else 'upstream-probe'}-{lock['version']}-arm64"
     if variant == "sdk":
         validated_receipt = validate_sdk_build(work)
         payload = native_payload()
@@ -399,6 +414,13 @@ def package(work, variant, lock):
                     "native_payload": payload,
                     "sdk_revision": sdk_revision(),
                     "release_ready": False}
+        name += f"-{embedded['sdk_revision'][:12]}-{payload['sha256'][:12]}"
+    archive = artifacts / (name + ".zip")
+    metadata_path = artifacts / (name + ".json")
+    if archive.exists() or archive.is_symlink() or metadata_path.exists() or metadata_path.is_symlink():
+        raise ValueError("Packaged output already exists; choose a new --artifacts directory")
+    artifacts.mkdir(parents=True, exist_ok=True)
+    if embedded:
         resources = app / "Contents" / "Resources"
         resources.mkdir(parents=True, exist_ok=True)
         (resources / SDK_MANIFEST).write_text(
@@ -418,18 +440,23 @@ def package(work, variant, lock):
                  "--preserve-metadata=entitlements,flags,runtime", bundle])
         run(["codesign", "--verify", "--deep", "--strict", app])
         refresh_packaged_build_receipt(work, validated_receipt)
-    artifacts = ROOT / "artifacts"
-    artifacts.mkdir(exist_ok=True)
-    name = f"{'cobble-sdk' if variant == 'sdk' else 'upstream-probe'}-{lock['version']}-arm64"
-    archive = artifacts / (name + ".zip")
-    run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", app, archive])
+    # Reserve the destination exclusively before invoking ditto, including
+    # across different build work directories packaging into the same folder.
+    with archive.open("xb"):
+        pass
+    try:
+        run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", app, archive])
+    except BaseException:
+        archive.unlink(missing_ok=True)
+        raise
     metadata = {"lock": lock, "variant": variant, "archive": archive.name,
                 "sha256": file_sha256(archive), "release_ready": False,
                 "validation": "Built artifact only. Native harness, signing and behavior gates pending."}
     if embedded:
         metadata.update(native_payload=embedded["native_payload"],
                         sdk_revision=embedded["sdk_revision"])
-    (artifacts / (name + ".json")).write_text(json.dumps(metadata, indent=2) + "\n")
+    with metadata_path.open("x") as stream:
+        stream.write(json.dumps(metadata, indent=2) + "\n")
 
 
 def main():
@@ -442,7 +469,13 @@ def main():
     parser.add_argument("--minimum-free-gib", type=int, default=100)
     parser.add_argument("--replace-sdk", action="store_true")
     parser.add_argument("--previous-sdk", type=Path)
+    parser.add_argument("--artifacts", type=Path,
+                        help="new output directory for immutable packaged archives")
     args = parser.parse_args()
+    if args.artifacts is not None and args.stage != "package":
+        parser.error("--artifacts is only valid for package")
+    if args.stage == "probe" and args.variant != "sdk":
+        parser.error("probe requires --variant sdk")
     lock = read_lock()
     work = args.work.resolve()
     if args.jobs < 1 or args.minimum_free_gib < 1 or args.compile_minutes < 1:
@@ -453,17 +486,13 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     # Cooperating stage invocations share one lock; a second stage must not
     # modify source, GN files or receipts underneath a running compiler.
-    with (work / ".cobble-build.lock").open("a") as writer:
-        try:
-            fcntl.flock(writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ValueError("Another build stage is already writing this work directory")
+    with build_lock(work):
         if args.stage == "preflight": preflight(work, args.minimum_free_gib)
         elif args.stage == "prepare": prepare(work, lock, args.replace_sdk, args.previous_sdk)
         elif args.stage == "configure": configure(work, args.variant)
         elif args.stage == "probe": compile_chrome(work, args.variant, args.jobs, args.compile_minutes, probe=True)
         elif args.stage == "compile": compile_chrome(work, args.variant, args.jobs, args.compile_minutes)
-        elif args.stage == "package": package(work, args.variant, lock)
+        elif args.stage == "package": package(work, args.variant, lock, args.artifacts)
 
 
 

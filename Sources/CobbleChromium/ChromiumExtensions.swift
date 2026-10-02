@@ -175,6 +175,9 @@ public enum ChromiumExtensionError: LocalizedError {
     }
 
     func requireNormalExtensionContext(_ context: ChromiumContext) throws {
+        guard context.runtime === self else {
+            throw ChromiumExtensionError.operationFailed("The extension context belongs to another runtime.")
+        }
         guard isReady, !context.isClosed, !context.isClosing else {
             throw ChromiumError.notReady
         }

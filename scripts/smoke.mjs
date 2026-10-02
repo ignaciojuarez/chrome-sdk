@@ -202,7 +202,7 @@ export async function startFixture(token, downloadDirectory) {
     } else if (url.pathname === `${prefix}/extension-target`) {
       response.writeHead(200, headers);
       response.end(`<!doctype html><html data-run="${token}"><head>
-        <title>Cobble Extension Baseline ${token}</title></head><body></body></html>`);
+        <title>Cobble Extension Baseline ${token}</title></head><body><p>Cobble cobble COBBLE</p></body></html>`);
     } else if ([`${prefix}/secure`, `${prefix}/secure-after-mixed`,
       `${prefix}/secure-recovery`, `${prefix}/mixed`]
       .includes(url.pathname)) {
@@ -2134,7 +2134,12 @@ async function main() {
     const devToolsResult = await devToolsActions;
     assert(devToolsResult.passed,
       `DevTools fixture failed: ${devToolsResult.error?.message ?? "unknown error"}`);
-    for (const check of ["nulProfileKeyRejected", "nulPrivateWindowKeyRejected",
+    for (const check of ["runtimeVersionAvailable", "emptyPrivateWindowKeyRejected",
+      "documentReadyAndProgress", "navigationFailureMetadata", "navigationFailureClearsOnRecovery",
+      "historyUsesStableEntryIdentity", "staleHistoryEntryRejected",
+      "findCaseInsensitiveCountsAllMatches", "findCaseSensitiveCountsExactMatches",
+      "findInitialTextAvailable", "findEmptyClearsResults",
+      "rendererTerminationReasonAvailable", "nulProfileKeyRejected", "nulPrivateWindowKeyRejected",
       "nulExtensionIdentifierRejected", "closedPageActionRejected", "extensionListed",
       "tabOutputMuteReported", "tabOutputUnmuteReported",
       "withheldBeforeGrant", "undeclaredGrantRejected", "declaredGrantInjected",
@@ -2515,6 +2520,7 @@ async function main() {
       } catch { return false; }
     });
     await access(join(downloadPath, `.progress-${fixture.networkDownloadName}`));
+    await access(join(downloadPath, `.nested-terminal-cancel-${fixture.networkDownloadName}`));
 
     const blobURL = await evaluate(cdp, `(() => {
       const blob = new Blob([${JSON.stringify(fixture.blobDownload)}], { type: "text/plain" });
@@ -2589,7 +2595,25 @@ async function main() {
       try { return (await readFile(interruptedDownloadPath)).equals(fixture.interruptedDownload); }
       catch { return false; }
     });
+    const completedMetadata = JSON.parse(await readFile(join(downloadPath,
+      `.metadata-complete-${fixture.interruptedDownloadName}.json`), "utf8"));
+    // Chromium may refine the generic response type using macOS's .bin mapping.
+    const binaryMimeTypes = ["application/octet-stream", "application/macbinary"];
+    assert(completedMetadata.originalURL === fixture.interruptedDownloadURL &&
+      completedMetadata.currentURL === fixture.interruptedDownloadURL &&
+      binaryMimeTypes.includes(completedMetadata.mimeType) &&
+      completedMetadata.receivedBytes === fixture.interruptedDownload.length &&
+      completedMetadata.totalBytes === fixture.interruptedDownload.length &&
+      completedMetadata.interruptionReason === null,
+    `Completed download metadata was incorrect: ${JSON.stringify(completedMetadata)}; expected URL=${fixture.interruptedDownloadURL}, bytes=${fixture.interruptedDownload.length}`);
     for (const episode of [1, 2]) {
+      const metadata = JSON.parse(await readFile(join(downloadPath,
+        `.metadata-interruption-${episode}-${fixture.interruptedDownloadName}.json`), "utf8"));
+      assert(metadata.originalURL === fixture.interruptedDownloadURL &&
+        metadata.currentURL === fixture.interruptedDownloadURL &&
+        binaryMimeTypes.includes(metadata.mimeType) &&
+        Number.isInteger(metadata.interruptionReason) && metadata.interruptionReason > 0,
+      `Missing interrupted download metadata for episode ${episode}`);
       await access(join(downloadPath, `.interrupted-${episode}-${fixture.interruptedDownloadName}`));
       await access(join(downloadPath, `.retry-${episode}-${fixture.interruptedDownloadName}`));
     }
