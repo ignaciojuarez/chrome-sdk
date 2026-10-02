@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "version": "153.0.8010.37",
-  "revision": "b75a5a95ea1a1b55bdbfd6d9f42d47be7507fb8b",
+  "version": "154.0.8037.98",
+  "revision": "b859317bf11f6be47f9b7799ec690a0a42a1fb33",
   "depot_tools_revision": "81577f19a8497ba7e41afac322e8f03553a863ec",
   "source": "https://chromium.googlesource.com/chromium/src.git",
   "channel": "stable",
   "platform": "mac",
-  "verified_at": "2026-09-12"
+  "verified_at": "2026-10-02"
 }
