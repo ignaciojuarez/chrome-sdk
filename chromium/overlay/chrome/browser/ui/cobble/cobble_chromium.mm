@@ -32,6 +32,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/uuid.h"
+#include "base/version_info/version_info.h"
+#include "net/base/net_errors.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -67,6 +69,7 @@
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_descriptor_util.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "components/security_state/content/content_utils.h"
 #include "components/security_state/core/security_state.h"
 #include "net/cert/cert_status_flags.h"
@@ -145,6 +148,10 @@ struct CCSPage final : public content::WebContentsObserver,
   void RenderFrameDeleted(content::RenderFrameHost* frame) override;
   void DidChangeVisibleSecurityState() override;
   void DidStopLoading() override;
+  void LoadProgressChanged(double progress) override;
+  void DocumentOnLoadCompletedInPrimaryMainFrame() override;
+  void OnRendererUnresponsive(content::RenderProcessHost* process) override;
+  void OnRendererResponsive(content::RenderProcessHost* process) override;
   void TitleWasSet(content::NavigationEntry* entry) override;
   void OnAudioStateChanged(bool) override;
   void DidUpdateAudioMutingState(bool) override;
@@ -175,6 +182,12 @@ struct CCSPage final : public content::WebContentsObserver,
   raw_ptr<Browser> browser = nullptr;
   std::string host_window_id;
   bool crashed = false;
+  double load_progress = 0;
+  int32_t renderer_termination_status = -1;
+  int64_t navigation_id = 0;
+  int navigation_error_code = net::OK;
+  std::string navigation_error_url;
+  std::string navigation_error_description;
   bool closed = false;
   bool close_requested = false;
   bool moving_hosts = false;
@@ -222,7 +235,7 @@ struct PendingPopup final : public content::WebContentsObserver {
 };
 
 struct BridgeState {
-  CCSClientV12 client = {};
+  CCSClientV13 client = {};
   bool enabled = false;
   bool ui_ready_sent = false;
   bool browser_started = false;
@@ -872,8 +885,14 @@ void CCSPage::SendState() {
                        ->GetMediaStreamCaptureIndicator();
   const bool has_pending_prompt = PageHasPendingMediaRequest(this) ||
                        cobble_chromium::PageHasPendingPrompt(web_contents());
-  const CCSPageStateV4 page_state = {
-      .struct_size = sizeof(CCSPageStateV4),
+  // Host callbacks may navigate or close this page before returning. Borrow
+  // local copies rather than storage owned by the page.
+  const auto favicon = favicon_png;
+  const std::string link = hovered_link;
+  const std::string error_url = navigation_error_url;
+  const std::string error_description = navigation_error_description;
+  const CCSPageStateV5 page_state = {
+      .struct_size = sizeof(CCSPageStateV5),
       .url_utf8 = url.c_str(),
       .title_utf8 = title.c_str(),
       .loading = static_cast<uint8_t>(web_contents()->IsLoading()),
@@ -899,10 +918,21 @@ void CCSPage::SendState() {
           !crashed && indicator->IsCapturingAudio(web_contents())),
       .capturing_camera = static_cast<uint8_t>(
           !crashed && indicator->IsCapturingVideo(web_contents())),
-      .favicon_png = favicon_png.empty() ? nullptr : favicon_png.data(),
-      .favicon_png_size = favicon_png.size(),
-      .hovered_link_utf8 = hovered_link.empty() ? nullptr : hovered_link.c_str(),
+      .favicon_png = favicon.empty() ? nullptr : favicon.data(),
+      .favicon_png_size = favicon.size(),
+      .hovered_link_utf8 = link.empty() ? nullptr : link.c_str(),
       .has_pending_prompt = static_cast<uint8_t>(has_pending_prompt),
+      .load_progress = load_progress,
+      .document_ready = static_cast<uint8_t>(
+          !crashed && web_contents()->IsDocumentOnLoadCompletedInPrimaryMainFrame()),
+      .renderer_unresponsive = static_cast<uint8_t>(
+          !crashed && web_contents()->GetPrimaryMainFrame()->GetRenderWidgetHost()
+                          ->IsCurrentlyUnresponsive()),
+      .renderer_termination_status = renderer_termination_status,
+      .navigation_id = navigation_id,
+      .navigation_error_code = navigation_error_code,
+      .navigation_error_url_utf8 = error_url.c_str(),
+      .navigation_error_description_utf8 = error_description.c_str(),
   };
   State().client.page_state_changed(State().client.user_data, this,
                                     &page_state);
@@ -927,6 +957,18 @@ void CCSPage::FlushPendingVisit(const std::string& title) {
 }
 
 void CCSPage::DidStartNavigation(content::NavigationHandle* handle) {
+  // Install the identity before any host callback can start another navigation.
+  if (handle->IsInPrimaryMainFrame()) {
+    if (!handle->IsSameDocument()) {
+      load_progress = 0;
+    }
+    navigation_id = handle->GetNavigationId();
+    navigation_error_code = net::OK;
+    navigation_error_url.clear();
+    navigation_error_description.clear();
+    crashed = false;
+    renderer_termination_status = -1;
+  }
   base::WeakPtr<CCSPage> local_file_alive = weak_factory.GetWeakPtr();
   cobble_chromium::LocalFileNavigationStarted(this, handle);
   if (!local_file_alive || closed || !web_contents()) {
@@ -944,8 +986,8 @@ void CCSPage::DidStartNavigation(content::NavigationHandle* handle) {
       return;
     }
   }
-  if (handle->IsInPrimaryMainFrame()) {
-    crashed = false;
+  if (handle->IsInPrimaryMainFrame() &&
+      navigation_id == handle->GetNavigationId()) {
     if (!handle->IsSameDocument()) {
       favicon_png.clear();
       hovered_link.clear();
@@ -971,6 +1013,13 @@ void CCSPage::DidFinishNavigation(content::NavigationHandle* handle) {
     return;
   }
   const bool successful = handle->HasCommitted() && !handle->IsErrorPage();
+  if (handle->GetNavigationId() == navigation_id &&
+      handle->GetNetErrorCode() != net::OK &&
+      handle->GetNetErrorCode() != net::ERR_ABORTED) {
+    navigation_error_code = handle->GetNetErrorCode();
+    navigation_error_url = handle->GetURL().spec();
+    navigation_error_description = net::ErrorToString(navigation_error_code);
+  }
   const bool same_document = successful && handle->IsSameDocument();
   const bool defer_cross_document =
       successful && !same_document && web_contents()->IsLoading();
@@ -1109,6 +1158,25 @@ void CCSPage::TitleWasSet(content::NavigationEntry* entry) {
   SendState();
 }
 
+void CCSPage::LoadProgressChanged(double progress) {
+  // Chromium resets its internal counter after reporting 1. Keep the event's
+  // value so later title/security callbacks cannot regress a completed load.
+  load_progress = progress;
+  SendState();
+}
+
+void CCSPage::DocumentOnLoadCompletedInPrimaryMainFrame() {
+  SendState();
+}
+
+void CCSPage::OnRendererUnresponsive(content::RenderProcessHost*) {
+  SendState();
+}
+
+void CCSPage::OnRendererResponsive(content::RenderProcessHost*) {
+  SendState();
+}
+
 void CCSPage::OnAudioStateChanged(bool) {
   SendState();
 }
@@ -1119,6 +1187,8 @@ void CCSPage::DidUpdateAudioMutingState(bool) {
 
 void CCSPage::PrimaryMainFrameRenderProcessGone(base::TerminationStatus status) {
   crashed = true;
+  load_progress = 0;
+  renderer_termination_status = static_cast<int32_t>(status);
   base::WeakPtr<CCSPage> local_file_alive = weak_factory.GetWeakPtr();
   cobble_chromium::LocalFileRenderProcessGone(this);
   if (!local_file_alive || closed || !web_contents()) {
@@ -1250,9 +1320,20 @@ void CCSPage::RetireBridge() {
   }
 }
 
-extern "C" int32_t CCSSetClient(const CCSClientV12* client) {
+extern "C" uint8_t CCSGetRuntimeInfo(CCSRuntimeInfoV1* info) {
+  if (!info || info->struct_size < sizeof(CCSRuntimeInfoV1)) {
+    return 0;
+  }
+  *info = {.struct_size = sizeof(CCSRuntimeInfoV1),
+           .abi_version = CCS_ABI_VERSION,
+           .chromium_version_utf8 = version_info::GetVersionNumber().data(),
+           .chromium_revision_utf8 = version_info::GetLastChange().data()};
+  return 1;
+}
+
+extern "C" int32_t CCSSetClient(const CCSClientV13* client) {
   constexpr size_t kMinimumClientSize =
-      offsetof(CCSClientV12, extension_install_cancelled) +
+      offsetof(CCSClientV13, extension_install_cancelled) +
       sizeof(client->extension_install_cancelled);
   if (!client || client->abi_version != CCS_ABI_VERSION ||
       client->struct_size < kMinimumClientSize) {
@@ -1745,7 +1826,7 @@ std::string& PendingHostWindowIDForDevTools() {
   return PendingHostWindowID();
 }
 
-const CCSClientV12& Client() {
+const CCSClientV13& Client() {
   return State().client;
 }
 
@@ -2178,7 +2259,7 @@ bool NotifyDownloadCreated(CCSPageRef page,
 }
 
 void NotifyDownloadStateChanged(CCSDownloadRef download,
-                                const CCSDownloadStateV1* download_state) {
+                                const CCSDownloadStateV2* download_state) {
   BridgeState& state = State();
   if (!state.stopping && state.client.download_state_changed) {
     state.client.download_state_changed(state.client.user_data, download,

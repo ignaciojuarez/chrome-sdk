@@ -2,7 +2,7 @@ diff --git a/chrome/app/framework.exports b/chrome/app/framework.exports
 index 37c881f..67d8a66 100644
 --- a/chrome/app/framework.exports
 +++ b/chrome/app/framework.exports
-@@ -19,3 +19,66 @@
+@@ -19,3 +19,71 @@
  _ChromeAppModeStart_v8
  _ChromeMain
  _ChromeWebAppShortcutCopierMain
@@ -35,6 +35,10 @@ index 37c881f..67d8a66 100644
 +_CCSPageMoveToHost
 +_CCSPageOpenDevTools
 +_CCSPageFind
++_CCSPageFindWithOptions
++_CCSPageCopyInitialFindText
++_CCSPageCopyNavigationHistoryJSON
++_CCSPageGoToHistoryEntry
 +_CCSPageGetZoomFactor
 +_CCSPageSetZoomFactor
 +_CCSPagePrint
@@ -53,6 +57,7 @@ index 37c881f..67d8a66 100644
 +_CCSMediaPermissionResolve
 +_CCSJavaScriptDialogResolve
 +_CCSHTTPAuthResolve
++_CCSGetRuntimeInfo
 +_CCSHTTPAuthCancel
 +_CCSFileChooserResolve
 +_CCSExternalProtocolResolve

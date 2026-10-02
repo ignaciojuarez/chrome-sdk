@@ -4,13 +4,16 @@ A native macOS SDK built on Chromium, with a Swift API for embedding the browser
 
 | | |
 | --- | --- |
-| ABI | 17 |
+| ABI | 18 (development; matched runtime required) |
 | Engine | Chromium 153.0.8010.37, pinned in [`chromium.lock.json`](chromium.lock.json) |
 | Platform | Apple Silicon macOS |
 | Source | Swift 6, Objective-C++, C++, Python |
 | Status | Development build; no release signing or notarization |
 
 The app embeds Chromium's real framework, helpers, and resources. The Swift package alone does not render pages. Cobble also builds separately with WebKit.
+
+See [AUDIT.md](AUDIT.md) for the feature inventory, known gaps, ownership map,
+and validation limits. Existing APIs do not imply full Chrome UI compatibility.
 
 ## Development workflow
 
@@ -20,6 +23,15 @@ exact SDK commit, and Full packaging requires that commit’s matched runtime,
 ABI, source lock and native-payload hashes. Keep one incremental Chromium work
 directory outside Git. Keep packaged runtimes outside the source checkout and
 retain one rollback runtime instead of copying source/build trees.
+
+ABI 18 adds `runtimeInfo()`, structured main-frame navigation failures,
+load progress/document readiness, primary-renderer health, native history entry
+selection, case-sensitive/count-only find, initial find text, and download source,
+MIME, byte-count and interruption metadata. Download MIME is Chromium's effective
+type and may reflect the filename's native mapping rather than the response
+header alone. This client requires a rebuilt ABI 18 runtime; ABI 17 binaries
+cannot load it. Recoverable download failures preserve
+callbacks through repeated retries, and an empty private-window key is rejected.
 
 ABI 17 adds `ChromiumRuntime.onPopupWithDisposition`, delivering the created
 child’s exact opening intent. Command-click and middle-click children can stay
@@ -53,7 +65,12 @@ python3 scripts/build.py compile --work "$WORK" --variant sdk
 python3 scripts/build.py package --work "$WORK" --variant sdk
 ```
 
-The build produces an unbranded `Chromium.app` and a versioned SDK archive under the ignored `artifacts/` directory. Packaging checks the source lock, overlay, patch hashes, exports, and successful build receipt. To run the independent harness:
+The build produces an unbranded `Chromium.app` and an SDK archive named with
+the engine version, SDK revision and native-payload fingerprint. Packaging
+refuses existing output and checks the source lock, overlay, patch hashes,
+exports, and successful build receipt. Use `package --artifacts /path/to/new-output`
+to keep immutable archives outside the source checkout; the default is ignored
+`artifacts/`. To run the independent harness:
 
 ```sh
 python3 scripts/assemble_harness.py "$WORK/src/out/Cobble/Chromium.app" \
@@ -65,7 +82,8 @@ The build can take hours and substantial memory. `--jobs` controls native build 
 
 ## Layout
 
-- `Sources/CobbleChromium/`: Swift runtime and page API.
+- `Sources/CobbleChromium/`: Swift process (`ChromiumRuntime`), profile
+  (`ChromiumContext`), page (`ChromiumPage`), consent (`ChromiumPrompts`) and service APIs.
 - `Sources/CCobbleChromium/`: dynamic loader for the native bridge.
 - `chromium/overlay/` and `chromium/patches/`: additions and changes to the pinned Chromium source.
 - `Sources/ChromiumHarness/` and `scripts/smoke.mjs`: isolated native behavior checks.

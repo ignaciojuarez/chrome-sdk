@@ -23,6 +23,7 @@ int32_t CCSLoadAPIFromHandle(void* library, CCSAPI* api, char* error, size_t cap
     memcpy(&api->member, &address, sizeof(address)); \
   } while (0)
 
+  RESOLVE(get_runtime_info, "CCSGetRuntimeInfo");
   RESOLVE(set_client, "CCSSetClient");
   RESOLVE(request_quit, "CCSRequestQuit");
   RESOLVE(cancel_quit, "CCSCancelQuit");
@@ -36,6 +37,8 @@ int32_t CCSLoadAPIFromHandle(void* library, CCSAPI* api, char* error, size_t cap
   RESOLVE(page_load_url, "CCSPageLoadURL");
   RESOLVE(page_go_back, "CCSPageGoBack");
   RESOLVE(page_go_forward, "CCSPageGoForward");
+  RESOLVE(page_copy_navigation_history_json, "CCSPageCopyNavigationHistoryJSON");
+  RESOLVE(page_go_to_history_entry, "CCSPageGoToHistoryEntry");
   RESOLVE(page_reload, "CCSPageReload");
   RESOLVE(page_reload_from_origin, "CCSPageReloadFromOrigin");
   RESOLVE(page_stop, "CCSPageStop");
@@ -43,6 +46,8 @@ int32_t CCSLoadAPIFromHandle(void* library, CCSAPI* api, char* error, size_t cap
   RESOLVE(page_set_visible, "CCSPageSetVisible");
   RESOLVE(page_move_to_host, "CCSPageMoveToHost");
   RESOLVE(page_find, "CCSPageFind");
+  RESOLVE(page_find_with_options, "CCSPageFindWithOptions");
+  RESOLVE(page_copy_initial_find_text, "CCSPageCopyInitialFindText");
   RESOLVE(page_get_zoom_factor, "CCSPageGetZoomFactor");
   RESOLVE(page_set_zoom_factor, "CCSPageSetZoomFactor");
   RESOLVE(page_print, "CCSPagePrint");

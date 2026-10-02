@@ -19,6 +19,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
@@ -492,7 +493,15 @@ void CancelPageCaptures(content::WebContents* contents) {
 }  // namespace cobble_chromium
 
 int32_t CCSPageFind(CCSPageRef page, const char* text_utf8, uint8_t backwards) {
+  return CCSPageFindWithOptions(page, text_utf8, backwards ? 1 : 0);
+}
+
+int32_t CCSPageFindWithOptions(CCSPageRef page, const char* text_utf8,
+                               uint32_t options) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (options & ~7u || cobble_chromium::IsStopping()) {
+    return -1;
+  }
   auto* contents = cobble_chromium::PageWebContents(page);
   if (!contents || !text_utf8) {
     return -1;
@@ -504,8 +513,9 @@ int32_t CCSPageFind(CCSPageRef page, const char* text_utf8, uint8_t backwards) {
   // Chromium owns request IDs, repeated searches, cross-frame matching and
   // highlighting. Empty text clears the active search through this same API.
   const std::u16string text = base::UTF8ToUTF16(text_utf8);
-  helper->StartFinding(text, !backwards,
-                       /*case_sensitive=*/false, /*find_match=*/true);
+  helper->StartFinding(text, !(options & 1u),
+                       /*case_sensitive=*/options & 2u,
+                       /*find_match=*/!(options & 4u));
   return helper->find_text().empty() ? 0 : helper->current_find_request_id();
 }
 
@@ -795,4 +805,99 @@ void CCSPageCopyConnectionDetailsJSON(CCSPageRef page,
   }
   callback(callback_data, reinterpret_cast<const uint8_t*>(json.data()),
            json.size(), nullptr);
+}
+
+void CCSPageCopyInitialFindText(CCSPageRef page, void* callback_data,
+                                CCSPageDataCallback callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (!callback) {
+    return;
+  }
+  auto* contents = cobble_chromium::PageWebContents(page);
+  auto* helper = contents ? find_in_page::FindTabHelper::FromWebContents(contents)
+                         : nullptr;
+  if (cobble_chromium::IsStopping() || !helper) {
+    callback(callback_data, nullptr, 0, "Find is unavailable for this page");
+    return;
+  }
+  auto* view = contents->GetRenderWidgetHostView();
+  std::u16string selected = view ? view->GetSelectedText() : std::u16string();
+  base::TrimWhitespace(selected, base::TRIM_ALL, &selected);
+  const std::string text = base::UTF16ToUTF8(
+      selected.empty() ? helper->GetInitialSearchText() : selected);
+  if (text.size() > 1024 * 1024) {
+    callback(callback_data, nullptr, 0, "The selected search text is too large");
+    return;
+  }
+  callback(callback_data, reinterpret_cast<const uint8_t*>(text.data()),
+           text.size(), nullptr);
+}
+
+void CCSPageCopyNavigationHistoryJSON(CCSPageRef page, void* callback_data,
+                                      CCSPageDataCallback callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (!callback) {
+    return;
+  }
+  auto* contents = cobble_chromium::PageWebContents(page);
+  if (cobble_chromium::IsStopping() || !contents) {
+    callback(callback_data, nullptr, 0, "Navigation history is unavailable");
+    return;
+  }
+  auto& controller = contents->GetController();
+  const int count = controller.GetEntryCount();
+  if (count > 512) {
+    callback(callback_data, nullptr, 0, "Navigation history exceeds its limit");
+    return;
+  }
+  base::ListValue entries;
+  for (int index = 0; index < count; ++index) {
+    auto* entry = controller.GetEntryAtIndex(index);
+    const std::string url = entry->GetVirtualURL().spec();
+    if (url.size() > 65536) {
+      callback(callback_data, nullptr, 0, "A history URL exceeds its limit");
+      return;
+    }
+    base::DictValue value;
+    value.Set("id", entry->GetUniqueID());
+    value.Set("url", url);
+    value.Set("title", base::UTF16ToUTF8(entry->GetTitle().substr(0, 1024)));
+    // Local documents require a fresh descriptor authorization, including when
+    // a previously returned entry is selected after authorization has expired.
+    value.Set("canNavigate", !entry->GetURL().SchemeIsFile());
+    entries.Append(std::move(value));
+  }
+  base::DictValue root;
+  root.Set("schemaVersion", 1);
+  root.Set("currentIndex", controller.GetLastCommittedEntryIndex());
+  root.Set("entries", std::move(entries));
+  std::string json;
+  if (!base::JSONWriter::Write(root, &json) || json.size() > 4 * 1024 * 1024) {
+    callback(callback_data, nullptr, 0, "Navigation history exceeds its limit");
+    return;
+  }
+  callback(callback_data, reinterpret_cast<const uint8_t*>(json.data()),
+           json.size(), nullptr);
+}
+
+uint8_t CCSPageGoToHistoryEntry(CCSPageRef page, int32_t entry_id) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  auto* contents = cobble_chromium::PageWebContents(page);
+  if (cobble_chromium::IsStopping() || !contents || entry_id <= 0) {
+    return 0;
+  }
+  auto& controller = contents->GetController();
+  for (int index = 0; index < controller.GetEntryCount(); ++index) {
+    auto* entry = controller.GetEntryAtIndex(index);
+    if (entry->GetUniqueID() != entry_id) {
+      continue;
+    }
+    const int offset = index - controller.GetCurrentEntryIndex();
+    if (!cobble_chromium::CanNavigateLocalFileHistory(page, offset)) {
+      return 0;
+    }
+    controller.GoToIndex(index);
+    return 1;
+  }
+  return 0;
 }

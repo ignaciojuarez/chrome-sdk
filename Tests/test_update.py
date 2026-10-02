@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from build import (BUILD_RECEIPT, bootstrap_depot_tools, build_directory,
-                   compile_chrome, native_payload, package, read_lock, record_sdk_build,
-                   validate_sdk_build,
+                   compile_chrome, native_payload, package, probe_targets, read_lock, record_sdk_build,
+                   sdk_build_inputs, validate_sdk_build,
                    validate_sdk_exports, validate_sdk_history_policy,
                    validate_sdk_source, verify_tag)
 from assemble_harness import validate_embedded_manifest
@@ -20,6 +20,37 @@ from update import MAX_RELEASE_BYTES, candidate, discover, write_lock
 
 
 class UpdateTests(unittest.TestCase):
+    def test_build_inputs_reject_tracked_source_drift_after_apply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src"
+            source.mkdir()
+            patches = root / "chromium/patches"
+            patches.mkdir(parents=True)
+            tracked = source / "source.cc"
+            tracked.write_text("upstream\n")
+            for command in (["git", "init", "-q"], ["git", "add", "."],
+                            ["git", "-c", "user.name=SDK Test", "-c",
+                             "user.email=sdk-test@example.invalid", "commit", "-qm", "base"]):
+                subprocess.run(command, cwd=source, check=True)
+            (patches / "0001.patch").write_text(
+                "diff --git a/source.cc b/source.cc\n--- a/source.cc\n+++ b/source.cc\n"
+                "@@ -1 +1 @@\n-upstream\n+patched\n")
+            tracked.write_text("patched\n")
+            with (patch("build.ROOT", root),
+                  patch("build.read_lock", return_value=self.current),
+                  patch("build.validate_checkout"),
+                  patch("build.native_payload", return_value={"overlay": {}}),
+                  patch("build.validate_sdk_source"),
+                  patch("build.validate_installed_files"),
+                  patch("build.validate_sdk_exports"),
+                  patch("build.validate_sdk_history_policy"),
+                  patch("build.file_sha256", return_value="fixture")):
+                sdk_build_inputs(root)
+                tracked.write_text("unexpected local change\n")
+                with self.assertRaises(subprocess.CalledProcessError):
+                    sdk_build_inputs(root)
+
     def setUp(self):
         self.current = read_lock()
         # Stable fixture, independent of the repository's advancing live pin.
@@ -220,6 +251,24 @@ class UpdateTests(unittest.TestCase):
                         build.main()
                     preflight.assert_not_called()
 
+    def test_direct_overlay_cli_uses_the_build_writer_lock(self):
+        import apply_chromium
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "src"
+            source.mkdir()
+            with (Path(directory) / ".cobble-build.lock").open("a") as writer:
+                fcntl.flock(writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch("sys.argv", ["apply_chromium.py", str(source)]), patch("apply_chromium.apply") as apply:
+                    with self.assertRaisesRegex(ValueError, "already writing"):
+                        apply_chromium.main()
+                    apply.assert_not_called()
+
+    def test_probe_rejects_stale_source_before_starting_ninja(self):
+        with patch("build.sdk_build_inputs", side_effect=ValueError("stale payload")), patch("build.run") as run:
+            with self.assertRaisesRegex(ValueError, "stale payload"):
+                compile_chrome(Path("/unused"), "sdk", 1, 1, probe=True)
+            run.assert_not_called()
+
     def test_compile_stops_its_process_group_at_disk_floor(self):
         with tempfile.TemporaryDirectory() as directory:
             with (patch("build.sdk_build_inputs", return_value={}),
@@ -248,6 +297,7 @@ class UpdateTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             with (patch("build.run", side_effect=run),
+                  patch("build.sdk_build_inputs", return_value={"fixture": True}),
                   patch("build.build_environment", return_value={}),
                   patch("build.subprocess.Popen") as process):
                 process.return_value.wait.return_value = 0
@@ -257,6 +307,20 @@ class UpdateTests(unittest.TestCase):
                 self.assertIn("obj/cobble_extension_install_prompt.o", process.call_args.args[0])
                 self.assertIn("obj/cobble_local_file.o",
                               process.call_args.args[0])
+
+    def test_probe_tracks_overlay_sources_and_rejects_missing_or_duplicate_objects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            overlay = root / "chromium/overlay/chrome/browser/ui/cobble"
+            overlay.mkdir(parents=True)
+            for name in ("cobble_new.mm", "cobble_other.cc", "cobble_api.h"):
+                (overlay / name).touch()
+            complete = "obj/cobble_new.o: objcxx\nobj/cobble_other.o: cxx"
+            self.assertEqual(probe_targets(complete, root),
+                             ["obj/cobble_new.o", "obj/cobble_other.o"])
+            for listing in ("obj/cobble_new.o: objcxx", complete + "\nother/cobble_new.o: objcxx"):
+                with self.assertRaisesRegex(ValueError, "missing or ambiguous"):
+                    probe_targets(listing, root)
 
     def test_failed_compile_invalidates_prior_build_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -344,11 +408,18 @@ class UpdateTests(unittest.TestCase):
                 self.assertEqual(strict_verifications,
                                  [["codesign", "--verify", "--deep", "--strict", app]])
                 validate_sdk_build(work)
-                package(work, "sdk", self.current)
+                archives = list((root / "artifacts").glob("*.zip"))
+                self.assertEqual(len(archives), 1)
+                self.assertIn("a" * 12, archives[0].name)
+                original = archives[0].read_bytes()
+                with self.assertRaisesRegex(ValueError, "already exists"):
+                    package(work, "sdk", self.current)
+                self.assertEqual(archives[0].read_bytes(), original)
+                package(work, "sdk", self.current, root / "second")
                 validate_sdk_build(work)
                 mutate_receipt = True
                 with self.assertRaisesRegex(ValueError, "receipt changed during"):
-                    package(work, "sdk", self.current)
+                    package(work, "sdk", self.current, root / "receipt-race")
                 self.assertEqual(json.loads(receipt_path.read_text())["binaries"],
                                  {"changed": "during packaging"})
                 with self.assertRaisesRegex(ValueError, "stale"):
@@ -358,7 +429,7 @@ class UpdateTests(unittest.TestCase):
                 successful = receipt_path.read_bytes()
                 fail_verification = True
                 with self.assertRaises(subprocess.CalledProcessError):
-                    package(work, "sdk", self.current)
+                    package(work, "sdk", self.current, root / "signature-failure")
                 self.assertEqual(receipt_path.read_bytes(), successful)
                 with self.assertRaisesRegex(ValueError, "stale"):
                     validate_sdk_build(work)

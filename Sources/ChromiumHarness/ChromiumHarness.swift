@@ -430,6 +430,24 @@ public func CCSClientMain(_ launcherFrameworkHandle: UnsafeMutableRawPointer?) -
     private func complete() {
         guard !finished, let staging, let destination else { return }
         do {
+            if let automaticDirectory, download.suggestedFilename.hasPrefix("network-") {
+                // The terminal file barrier has already completed. Cancelling
+                // again synchronously nests a native callback inside onFinish.
+                var completed = false
+                download.cancel {
+                    completed = true
+                    self.download.release()
+                }
+                guard completed else {
+                    throw ChromiumError.operationFailed("Terminal cancellation callback was not immediate.")
+                }
+                // AppKit modal event processing must not delete the native
+                // download while the outer state callback still uses its frame.
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                try Data().write(to: automaticDirectory.appendingPathComponent(
+                    ".nested-terminal-cancel-\(safeFilename(download.suggestedFilename))"))
+            }
+            try recordMetadata(phase: "complete")
             if destinationExisted {
                 _ = try FileManager.default.replaceItemAt(
                     destination, withItemAt: staging, options: .usingNewMetadataOnly)
@@ -454,6 +472,7 @@ public func CCSClientMain(_ launcherFrameworkHandle: UnsafeMutableRawPointer?) -
             let name = safeFilename(download.suggestedFilename)
             if name.hasPrefix("interrupt-"), download.canResume {
                 interruptionCount += 1
+                try? recordMetadata(phase: "interruption-\(interruptionCount)")
                 try? Data(error.localizedDescription.utf8).write(to: automaticDirectory
                     .appendingPathComponent(".interrupted-\(interruptionCount)-\(name)"))
                 if name.hasPrefix("interrupt-release-") {
@@ -505,6 +524,21 @@ public func CCSClientMain(_ launcherFrameworkHandle: UnsafeMutableRawPointer?) -
                 to: automaticDirectory.appendingPathComponent(".failed-\(name)"))
         }
         finish()
+    }
+
+    private func recordMetadata(phase: String) throws {
+        guard let automaticDirectory else { return }
+        let value: [String: Any] = [
+            "originalURL": download.originalURL?.absoluteString ?? "",
+            "currentURL": download.currentURL?.absoluteString ?? "",
+            "mimeType": download.mimeType ?? "",
+            "receivedBytes": download.receivedBytes,
+            "totalBytes": download.totalBytes.map { $0 as Any } ?? NSNull(),
+            "interruptionReason": download.interruptionReasonCode.map { $0 as Any } ?? NSNull(),
+        ]
+        try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]).write(
+            to: automaticDirectory.appendingPathComponent(
+                ".metadata-\(phase)-\(safeFilename(download.suggestedFilename)).json"), options: .atomic)
     }
 
     private func recordProgress(received: Int64, total: Int64) {

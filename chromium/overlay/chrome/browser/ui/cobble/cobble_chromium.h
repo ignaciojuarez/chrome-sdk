@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define CCS_ABI_VERSION 17u
+#define CCS_ABI_VERSION 18u
 // Chromium compiles with hidden visibility; the client resolves this ABI by name.
 #define CCS_EXPORT __attribute__((visibility("default")))
 
@@ -145,7 +145,7 @@ typedef enum CCSDownloadStatus {
   CCS_DOWNLOAD_FAILED = 3,
 } CCSDownloadStatus;
 
-typedef struct CCSDownloadStateV1 {
+typedef struct CCSDownloadStateV2 {
   uint32_t struct_size;
   int64_t received_bytes;
   int64_t total_bytes;
@@ -154,7 +154,12 @@ typedef struct CCSDownloadStateV1 {
   // failed update is recoverable only while CCSDownloadGetControlState returns
   // the can-resume bit; otherwise it is terminal.
   const char* error_utf8;
-} CCSDownloadStateV1;
+  const char* original_url_utf8;
+  const char* current_url_utf8;
+  const char* mime_type_utf8;
+  // Chromium DownloadInterruptReason; zero means no interruption.
+  int32_t interrupt_reason;
+} CCSDownloadStateV2;
 
 typedef enum CCSPageConnection {
   CCS_PAGE_CONNECTION_UNKNOWN = 0,
@@ -214,7 +219,7 @@ typedef struct CCSExtensionInstallRequestV1 {
   uint8_t requests_host_permissions;
 } CCSExtensionInstallRequestV1;
 
-typedef struct CCSPageStateV4 {
+typedef struct CCSPageStateV5 {
   uint32_t struct_size;
   const char* url_utf8;
   const char* title_utf8;
@@ -237,9 +242,28 @@ typedef struct CCSPageStateV4 {
   size_t favicon_png_size;
   const char* hovered_link_utf8;
   uint8_t has_pending_prompt;
-} CCSPageStateV4;
+  // ABI 18: native estimates/state, not timers or synthetic progress.
+  double load_progress;
+  uint8_t document_ready;
+  uint8_t renderer_unresponsive;
+  // base::TerminationStatus; -1 until a renderer termination is observed.
+  int32_t renderer_termination_status;
+  // Last primary navigation failure, excluding ERR_ABORTED. Cleared on a new
+  // primary navigation. A zero error code means no failure; strings are borrowed.
+  int64_t navigation_id;
+  int32_t navigation_error_code;
+  const char* navigation_error_url_utf8;
+  const char* navigation_error_description_utf8;
+} CCSPageStateV5;
 
-typedef struct CCSClientV12 {
+typedef struct CCSRuntimeInfoV1 {
+  uint32_t struct_size;
+  uint32_t abi_version;
+  const char* chromium_version_utf8;
+  const char* chromium_revision_utf8;
+} CCSRuntimeInfoV1;
+
+typedef struct CCSClientV13 {
   uint32_t abi_version;
   uint32_t struct_size;
   void* user_data;
@@ -250,7 +274,7 @@ typedef struct CCSClientV12 {
   void (*runtime_will_stop)(void* user_data);
   void (*page_state_changed)(void* user_data,
                              CCSPageRef page,
-                             const CCSPageStateV4* state);
+                             const CCSPageStateV5* state);
   void (*page_closed)(void* user_data, CCSPageRef page);
   void (*popup_created)(void* user_data,
                         CCSPageRef opener,
@@ -300,7 +324,7 @@ typedef struct CCSClientV12 {
                            const char* suggested_filename_utf8);
   void (*download_state_changed)(void* user_data,
                                  CCSDownloadRef download,
-                                 const CCSDownloadStateV1* state);
+                                 const CCSDownloadStateV2* state);
   // Return nonzero to permit creation. Missing callbacks deny before Chromium
   // allocates a child WebContents.
   uint8_t (*popup_requested)(void* user_data,
@@ -370,7 +394,7 @@ typedef struct CCSClientV12 {
                                          CCSPageRef popup,
                                          const char* host_window_id_utf8,
                                          int32_t disposition);
-} CCSClientV12;
+} CCSClientV13;
 
 // Outer-app client entry point. The patched Chromium browser launcher requires
 // Contents/Frameworks/CobbleChromiumClient.dylib and calls its
@@ -389,7 +413,10 @@ typedef void (*CCSPageDataCallback)(void* callback_data,
 // Register before calling the framework's ChromeMain export. Chromium owns the
 // main message loop; every other CCS function and callback runs on that thread.
 // The client table is copied. Returns zero on success.
-CCS_EXPORT int32_t CCSSetClient(const CCSClientV12* client);
+CCS_EXPORT int32_t CCSSetClient(const CCSClientV13* client);
+// Static build identity. Safe before registration; strings live for the process.
+// Caller initializes struct_size. Returns zero for undersized/null output.
+CCS_EXPORT uint8_t CCSGetRuntimeInfo(CCSRuntimeInfoV1* info);
 CCS_EXPORT void CCSRequestQuit(uint8_t ignore_unload_handlers);
 // Abandons a client-deferred quit after a page refuses to close.
 CCS_EXPORT void CCSCancelQuit(void);
@@ -424,6 +451,11 @@ CCS_EXPORT void* CCSPageView(CCSPageRef page);
 CCS_EXPORT void CCSPageLoadURL(CCSPageRef page, const char* url_utf8);
 CCS_EXPORT void CCSPageGoBack(CCSPageRef page);
 CCS_EXPORT void CCSPageGoForward(CCSPageRef page);
+// Bounded tab-local history. Entry IDs, unlike indices, reject stale selections.
+CCS_EXPORT void CCSPageCopyNavigationHistoryJSON(CCSPageRef page,
+    void* callback_data, CCSPageDataCallback callback);
+CCS_EXPORT uint8_t CCSPageGoToHistoryEntry(CCSPageRef page, int32_t entry_id);
+
 // Returns zero when reload is unavailable or would repost form data. Cobble
 // never silently turns a POST reload into a GET or asks Chromium to repost.
 CCS_EXPORT uint8_t CCSPageReload(CCSPageRef page);
@@ -439,6 +471,13 @@ CCS_EXPORT uint8_t CCSPageMoveToHost(CCSPageRef page,
 // empty query cleared the search, or -1 when unavailable. Match results arrive
 // through page_find_result.
 CCS_EXPORT int32_t CCSPageFind(CCSPageRef page, const char* text_utf8, uint8_t backwards);
+// Options: bit 0 backwards, bit 1 case-sensitive, bit 2 highlight/count only.
+// Unknown bits are rejected. Chromium does not expose whole-word matching here.
+CCS_EXPORT int32_t CCSPageFindWithOptions(CCSPageRef page,
+    const char* text_utf8, uint32_t options);
+CCS_EXPORT void CCSPageCopyInitialFindText(CCSPageRef page,
+    void* callback_data, CCSPageDataCallback callback);
+
 // Returns zero when the page has no zoom controller. Set uses Chromium's zoom
 // bounds and isolates the value to this tab; the client supplies its own UI.
 CCS_EXPORT double CCSPageGetZoomFactor(CCSPageRef page);
@@ -489,7 +528,7 @@ CCS_EXPORT uint8_t CCSPageIsClosed(CCSPageRef page);
 CCS_EXPORT void CCSPageRelease(CCSPageRef page);
 
 // Opens Chromium's bundled inspector in an undocked client-owned NSWindow.
-// The host UUID must already resolve through CCSClientV12.host_window. Only one
+// The host UUID must already resolve through CCSClientV13.host_window. Only one
 // live session is allowed per inspected page. The returned NSView is borrowed
 // until devtools_session_closed; docking, secondary inspectors, file-system
 // dialogs, certificate UI, and frontend-created tabs are disabled.
@@ -596,7 +635,7 @@ bool ShouldAllowPopup(content::RenderFrameHost* opener,
                       int disposition,
                       bool user_gesture,
                       bool opener_suppressed);
-const CCSClientV12& Client();
+const CCSClientV13& Client();
 std::string& PendingHostWindowIDForDevTools();
 uint64_t NextPromptRequestID();
 void RegisterShutdownCallback(void (*callback)());
@@ -633,7 +672,7 @@ bool NotifyDownloadCreated(CCSPageRef page,
                            CCSDownloadRef download,
                            const char* suggested_filename);
 void NotifyDownloadStateChanged(CCSDownloadRef download,
-                                const CCSDownloadStateV1* state);
+                                const CCSDownloadStateV2* state);
 
 }  // namespace cobble_chromium
 #endif

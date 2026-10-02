@@ -1,7 +1,7 @@
 diff --git a/chrome/app/framework.order b/chrome/app/framework.order
 --- a/chrome/app/framework.order
 +++ b/chrome/app/framework.order
-@@ -29,5 +29,78 @@
+@@ -29,5 +29,83 @@
  # Entry point for the web app shortcut copier.
  _ChromeWebAppShortcutCopierMain
  
@@ -36,6 +36,7 @@ diff --git a/chrome/app/framework.order b/chrome/app/framework.order
 +_CCSExternalProtocolResolve
 +_CCSClientCertificateCancel
 +_CCSClientCertificateSelect
++_CCSGetRuntimeInfo
 +_CCSHTTPAuthCancel
 +_CCSHTTPAuthResolve
 +_CCSJavaScriptDialogResolve
@@ -46,6 +47,10 @@ diff --git a/chrome/app/framework.order b/chrome/app/framework.order
 +_CCSPageCopyConnectionDetailsJSON
 +_CCSPageCurrentDOM
 +_CCSPageFind
++_CCSPageFindWithOptions
++_CCSPageCopyInitialFindText
++_CCSPageCopyNavigationHistoryJSON
++_CCSPageGoToHistoryEntry
 +_CCSPageFocus
 +_CCSPageForceClose
 +_CCSPageGetZoomFactor

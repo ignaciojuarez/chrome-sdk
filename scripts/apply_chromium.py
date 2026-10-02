@@ -2,6 +2,8 @@
 """Apply the pinned Cobble overlay to an exact Chromium checkout."""
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
 import os
@@ -14,6 +16,17 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 STAMP = ".cobble-chromium-sdk.json"
+
+
+@contextmanager
+def build_lock(work):
+    """All command-line source/build writers use the same nonblocking lease."""
+    with (work / ".cobble-build.lock").open("a") as writer:
+        try:
+            fcntl.flock(writer, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError("Another build stage is already writing this work directory")
+        yield
 
 
 def digest(path):
@@ -161,11 +174,16 @@ def replace_patches(source, installed, desired, previous_sdk=None,
 
 def copy_overlay(source, overlay, previous, desired):
     validate_installed_files(source, previous)
+    changed = {relative for relative, expected in desired.items()
+               if previous.get(relative) != expected}
+    removed = previous.keys() - desired.keys()
     staged = {}
     backups = {}
     swapped = []
     try:
         for relative in desired:
+            if relative not in changed:
+                continue  # Keep unchanged headers' mtimes and incremental objects.
             destination = source / relative
             if relative not in previous and destination.exists():
                 raise ValueError(f"Refusing to replace unmanaged file: {relative}")
@@ -177,6 +195,8 @@ def copy_overlay(source, overlay, previous, desired):
             shutil.copyfile(overlay / relative, temporary)
             staged[relative] = temporary
         for relative in previous:
+            if relative not in changed and relative not in removed:
+                continue
             destination = source / relative
             descriptor, name = tempfile.mkstemp(
                 prefix=".cobble-old-", dir=destination.parent)
@@ -187,7 +207,7 @@ def copy_overlay(source, overlay, previous, desired):
         for relative, temporary in staged.items():
             os.replace(temporary, source / relative)
             swapped.append(relative)
-        for relative in previous.keys() - desired.keys():
+        for relative in removed:
             (source / relative).unlink()
     except Exception:
         for relative in set(swapped) - previous.keys():
@@ -267,7 +287,8 @@ def main():
     args = parser.parse_args()
     if args.previous_sdk and not args.replace:
         parser.error("--previous-sdk requires --replace")
-    apply(args.source, replace=args.replace, previous_sdk=args.previous_sdk)
+    with build_lock(args.source.resolve().parent):
+        apply(args.source, replace=args.replace, previous_sdk=args.previous_sdk)
 
 
 if __name__ == "__main__":

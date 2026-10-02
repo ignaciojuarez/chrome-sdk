@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -61,6 +62,23 @@ class ApplyChromiumTests(unittest.TestCase):
             "second\n")
         MODULE.apply(self.source, self.sdk)
         self.assertEqual(installed.read_text(), "second\n")
+
+    def test_reapply_preserves_unchanged_headers_and_updates_only_changed_sources(self):
+        implementation = self.sdk / "chromium/overlay/chrome/cobble/bridge.cc"
+        implementation.write_text("old implementation\n")
+        MODULE.apply(self.source, self.sdk)
+        header = self.source / "chrome/cobble/bridge.h"
+        os.utime(header, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+        before = header.stat()
+        implementation.write_text("new implementation\n")
+        MODULE.apply(self.source, self.sdk)
+        after = header.stat()
+        self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
+        self.assertEqual((self.source / "chrome/cobble/bridge.cc").read_text(), "new implementation\n")
+        implementation.unlink()
+        MODULE.apply(self.source, self.sdk)
+        self.assertFalse((self.source / "chrome/cobble/bridge.cc").exists())
+        self.assertEqual(header.stat().st_mtime_ns, before.st_mtime_ns)
 
     def test_rejects_wrong_revision_and_changed_installed_overlay(self):
         lock = self.sdk / "chromium.lock.json"

@@ -9,6 +9,7 @@ nonisolated(unsafe) private var lastFileChooserCount: Int?
 nonisolated(unsafe) private var lastFileChooserCancelled = false
 nonisolated(unsafe) private var lastDialogAccept: UInt8?
 nonisolated(unsafe) private var lastAuthSubmitted = false
+nonisolated(unsafe) private var downloadControlState: UInt32 = 0
 
 @MainActor final class PromptAndDownloadSafetyTests: XCTestCase {
     override func setUp() {
@@ -17,6 +18,7 @@ nonisolated(unsafe) private var lastAuthSubmitted = false
         lastFileChooserCancelled = false
         lastDialogAccept = nil
         lastAuthSubmitted = false
+        downloadControlState = 0
     }
 
     func testDownloadTerminalStatusLatchesCallbacks() {
@@ -31,7 +33,7 @@ nonisolated(unsafe) private var lastAuthSubmitted = false
         download.onFailure = { _ in failures += 1 }
         download.onProgress = { _, _ in progress += 1 }
 
-        var state = CCSDownloadStateV1()
+        var state = CCSDownloadStateV2()
         state.status = CCS_DOWNLOAD_IN_PROGRESS
         state.received_bytes = 1
         state.total_bytes = 2
@@ -60,7 +62,7 @@ nonisolated(unsafe) private var lastAuthSubmitted = false
         download.onFinish = { finishes += 1 }
         download.onFailure = { _ in failures += 1 }
 
-        var state = CCSDownloadStateV1()
+        var state = CCSDownloadStateV2()
         state.status = CCS_DOWNLOAD_FAILED
         download.update(state)
         download.update(state)
@@ -77,6 +79,120 @@ nonisolated(unsafe) private var lastAuthSubmitted = false
         stopped.update(state)
         XCTAssertEqual(finishes, 0)
         XCTAssertEqual(failures, 1)
+    }
+
+    func testRecoverableDownloadKeepsCallbacksAcrossRepeatedInterruptions() throws {
+        var api = CCSAPI()
+        api.download_get_control_state = { _ in downloadControlState }
+        api.download_set_paused = { _, _ in downloadControlState = 1; return 1 }
+        let runtime = ChromiumRuntime(api: api)
+        let download = ChromiumDownload(runtime: runtime, page: nil,
+            handle: OpaquePointer(bitPattern: 20)!, suggestedFilename: "retry.bin")
+        var failures = 0
+        var progress = 0
+        var finishes = 0
+        download.onFailure = { _ in failures += 1 }
+        download.onProgress = { _, _ in progress += 1 }
+        download.onFinish = { finishes += 1 }
+        var state = CCSDownloadStateV2()
+        for _ in 0..<2 {
+            downloadControlState = 2
+            state.status = CCS_DOWNLOAD_FAILED
+            download.update(state)
+            XCTAssertTrue(download.canResume)
+            try download.resume()
+            state.status = CCS_DOWNLOAD_IN_PROGRESS
+            download.update(state)
+        }
+        downloadControlState = 0
+        state.status = CCS_DOWNLOAD_COMPLETE
+        download.update(state)
+        download.update(state)
+        XCTAssertEqual(failures, 2)
+        XCTAssertEqual(progress, 2)
+        XCTAssertEqual(finishes, 1)
+    }
+
+    func testDownloadMetadataIsCopiedBeforeCallbacksAndClearsOnResume() {
+        var api = CCSAPI()
+        api.download_get_control_state = { _ in 2 }
+        let runtime = ChromiumRuntime(api: api)
+        let download = ChromiumDownload(runtime: runtime, page: nil,
+            handle: OpaquePointer(bitPattern: 23)!, suggestedFilename: "redirect.bin")
+        var failures = 0
+        download.onFailure = { _ in
+            failures += 1
+            XCTAssertEqual(download.interruptionReasonCode, 20)
+            XCTAssertEqual(download.receivedBytes, 40)
+            XCTAssertNil(download.totalBytes)
+        }
+        var state = CCSDownloadStateV2()
+        state.status = CCS_DOWNLOAD_FAILED
+        state.interrupt_reason = 20
+        state.received_bytes = 40
+        state.total_bytes = -1
+        "https://example.test/start".withCString { original in
+            "https://example.test/file".withCString { current in
+                "application/octet-stream".withCString { mime in
+                    state.original_url_utf8 = original
+                    state.current_url_utf8 = current
+                    state.mime_type_utf8 = mime
+                    download.update(state)
+                }
+            }
+        }
+        XCTAssertEqual(failures, 1)
+        XCTAssertEqual(download.originalURL?.absoluteString, "https://example.test/start")
+        XCTAssertEqual(download.currentURL?.absoluteString, "https://example.test/file")
+        XCTAssertEqual(download.mimeType, "application/octet-stream")
+        state = CCSDownloadStateV2()
+        state.status = CCS_DOWNLOAD_IN_PROGRESS
+        state.received_bytes = -1
+        state.total_bytes = 100
+        download.update(state)
+        XCTAssertNil(download.interruptionReasonCode)
+        XCTAssertNil(download.originalURL)
+        XCTAssertNil(download.currentURL)
+        XCTAssertNil(download.mimeType)
+        XCTAssertEqual(download.receivedBytes, 0)
+        XCTAssertEqual(download.totalBytes, 100)
+    }
+
+    func testReleasedDownloadIgnoresLateStateEvenIfCallbacksAreReinstalled() {
+        let runtime = ChromiumRuntime(api: CCSAPI())
+        let download = ChromiumDownload(runtime: runtime, page: nil,
+            handle: OpaquePointer(bitPattern: 21)!, suggestedFilename: "released.bin")
+        download.release()
+        var finishes = 0
+        download.onFinish = { finishes += 1 }
+        var state = CCSDownloadStateV2()
+        state.status = CCS_DOWNLOAD_COMPLETE
+        download.update(state)
+        XCTAssertEqual(finishes, 0)
+    }
+
+    func testCancelBarrierDisablesControlsAndLateDestinationBeforeHostCompletion() {
+        var api = CCSAPI()
+        api.download_cancel = { _, data, callback in callback?(data) }
+        api.download_get_control_state = { _ in 2 }
+        api.download_set_destination = { _, _ in XCTFail("Cancelled destination reached native") }
+        let runtime = ChromiumRuntime(api: api)
+        let download = ChromiumDownload(runtime: runtime, page: nil,
+            handle: OpaquePointer(bitPattern: 22)!, suggestedFilename: "cancelled.bin")
+        var completions = 0
+        download.onFinish = { XCTFail("Cancelled download finished") }
+        download.cancel {
+            completions += 1
+            XCTAssertFalse(download.canResume)
+            do { try download.resume(); XCTFail("Cancelled download resumed") }
+            catch ChromiumError.closed {}
+            catch { XCTFail("Unexpected error: \(error)") }
+            download.setDestination(URL(fileURLWithPath: "/tmp/late-download.bin"))
+        }
+        var state = CCSDownloadStateV2()
+        state.status = CCS_DOWNLOAD_COMPLETE
+        download.update(state)
+        XCTAssertEqual(completions, 1)
     }
 
     func testJavaScriptPromptRejectsInteriorNUL() throws {
