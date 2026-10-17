@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from build import (BUILD_RECEIPT, bootstrap_depot_tools, build_directory,
-                   compile_chrome, native_payload, package, probe_targets, read_lock, record_sdk_build,
+                   compile_chrome, configure, native_payload, package, probe_targets, read_lock, record_sdk_build,
                    sdk_build_inputs, validate_sdk_build,
                    validate_sdk_exports, validate_sdk_history_policy,
                    validate_sdk_source, verify_tag)
@@ -20,6 +20,16 @@ from update import MAX_RELEASE_BYTES, candidate, discover, write_lock
 
 
 class UpdateTests(unittest.TestCase):
+    def test_unbranded_build_enables_social_video_codecs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            with patch("build.run"), patch("build.build_environment", return_value={}):
+                configure(work, "upstream")
+            args = (build_directory(work) / "args.gn").read_text()
+            self.assertIn('is_chrome_branded = false\n', args)
+            self.assertIn('proprietary_codecs = true\n', args)
+            self.assertIn('ffmpeg_branding = "Chrome"\n', args)
+
     def test_build_inputs_reject_tracked_source_drift_after_apply(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
