@@ -322,6 +322,8 @@ def configure(work, variant):
         'is_debug = false', 'is_component_build = false', 'is_official_build = true',
         'symbol_level = 0', 'blink_symbol_level = 0', 'v8_symbol_level = 0',
         'target_cpu = "arm64"', 'is_chrome_branded = false',
+        # Social sites serve H.264/AAC MP4 and HLS even in unbranded builds.
+        'proprietary_codecs = true', 'ffmpeg_branding = "Chrome"',
         # Xcode 27's SDK adds arm64e.x1 TAPI targets that Chromium 153's LLD 24
         # cannot parse. Apple's linker supports that SDK and remains incremental.
         'use_lld = false', 'use_thin_lto = false',

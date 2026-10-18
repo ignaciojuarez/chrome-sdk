@@ -91,7 +91,9 @@ The build can take hours and substantial memory. `--jobs` controls native build 
 
 ## Limits
 
-The project is under development. The packaged runtime is marked `release_ready: false`. Distribution signing, notarization, broad website compatibility, accessibility, performance, proprietary codecs, DRM, and some authentication flows remain unqualified. Do not treat the harness or source checks as a release gate.
+The unbranded runtime enables H.264/AAC for MP4, Media Source Extensions and HLS. This does not add Widevine or other DRM support.
+
+The project is under development. The packaged runtime is marked `release_ready: false`. Distribution signing, notarization, broad website compatibility, accessibility, performance, DRM, and some authentication flows remain unqualified. Do not treat the harness or source checks as a release gate.
 
 ## License and attribution
 
