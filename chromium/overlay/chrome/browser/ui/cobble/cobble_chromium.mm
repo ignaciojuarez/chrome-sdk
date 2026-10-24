@@ -34,6 +34,7 @@
 #include "base/uuid.h"
 #include "base/version_info/version_info.h"
 #include "net/base/net_errors.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -1981,6 +1982,74 @@ void UnregisterBrowser(Browser* browser) {
 
 CCSPageRef PageForWebContents(content::WebContents* contents) {
   return FindPage(contents);
+}
+
+bool HidesContextMenuCommand(int command_id, content::WebContents* contents) {
+  if (!FindPage(contents)) {
+    return false;
+  }
+  // Cobble pages live in its own tabs and windows. Hide page-menu commands
+  // that need Chrome windows, profiles, side panels, bubbles, settings pages,
+  // sync, the password manager or AI features, which Cobble does not host.
+  // View Source adds a tab without the popup handoff Cobble adopts.
+  if (command_id >= IDC_OPEN_LINK_IN_PROFILE_FIRST &&
+      command_id < IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION1) {
+    return true;
+  }
+  switch (command_id) {
+    // Inspect reuses DevTools that Cobble opened for this page. Otherwise it
+    // would create an unhosted Chrome DevTools window.
+    case IDC_CONTENT_CONTEXT_INSPECTELEMENT:
+    case IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS:
+      return !HasOpenOwnedDevTools(contents);
+    case IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE:
+    case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
+    case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
+    case IDC_CONTENT_CONTEXT_OPENLINKINPROFILE:
+    case IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP:
+    case IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW:
+    case IDC_CONTENT_CONTEXT_OPENLINK_ISOLATED:
+    case IDC_CONTENT_CONTEXT_ADD_LINK_TO_READING_LIST:
+    case IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE:
+    case IDC_CONTENT_CONTEXT_SEARCHLENSFORVIDEOFRAME:
+    case IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH:
+    case IDC_CONTENT_CONTEXT_WEB_REGION_SEARCH:
+    case IDC_CONTENT_CONTEXT_LENS_OVERLAY:
+    case IDC_CONTENT_CONTEXT_GLIC:
+    case IDC_CONTENT_CONTEXT_GLICSHAREIMAGE:
+    case IDC_CONTENT_CONTEXT_RELOAD_GLIC:
+    case IDC_CONTENT_CONTEXT_ARCHIVE_GLIC:
+    case IDC_CONTENT_CONTEXT_SAVE_TO_MEMORY_BANKS:
+    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_AT_MEMORY:
+    case IDC_CONTEXT_COMPOSE:
+    case IDC_CONTENT_CONTEXT_PICTUREINPICTURE:
+    case IDC_CONTENT_CONTEXT_TRANSLATE:
+    case IDC_CONTENT_CONTEXT_PARTIAL_TRANSLATE:
+    case IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE:
+    case IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE:
+    case IDC_CONTENT_CONTEXT_GENERATE_QR_CODE:
+    case IDC_CONTENT_CONTEXT_SHARING_SUBMENU:
+    case IDC_SEND_TAB_TO_SELF:
+    case IDC_ROUTE_MEDIA:
+    case IDC_VIEW_SOURCE:
+    case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
+    case IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS:
+    case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS:
+    case IDC_CONTENT_CONTEXT_SPELLING_TOGGLE:
+    case IDC_CONTENT_CONTEXT_ACCESSIBILITY_LABELS_TOGGLE:
+    case IDC_CONTENT_CONTEXT_ACCESSIBILITY_LABELS_TOGGLE_ONCE:
+    case IDC_CONTENT_CONTEXT_GENERATEPASSWORD:
+    case IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS:
+    case IDC_CONTENT_CONTEXT_USE_PASSKEY_FROM_ANOTHER_DEVICE:
+    case IDC_CONTENT_CONTEXT_AUTOFILL_FEEDBACK:
+    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD:
+    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_IMPORT_PASSWORDS:
+    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SUGGEST_PASSWORD:
+    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_USE_PASSKEY_FROM_ANOTHER_DEVICE:
+      return true;
+    default:
+      return false;
+  }
 }
 
 content::WebContents* PageWebContents(CCSPageRef page) {

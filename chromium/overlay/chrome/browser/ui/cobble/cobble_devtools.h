@@ -18,6 +18,7 @@ namespace cobble_chromium {
 
 bool IsOwnedDevTools(content::WebContents* contents);
 bool HasPendingOwnedDevTools(content::WebContents* inspected);
+bool HasOpenOwnedDevTools(content::WebContents* inspected);
 BrowserWindowInterface* CreateOwnedDevToolsBrowser(
     Profile* profile,
     content::WebContents* inspected);
