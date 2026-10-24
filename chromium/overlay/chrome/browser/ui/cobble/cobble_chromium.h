@@ -643,6 +643,7 @@ std::unique_ptr<ChromeBrowserMainExtraParts> CreateMainExtraParts();
 void RegisterBrowser(Browser* browser, BrowserWindow* window);
 void UnregisterBrowser(Browser* browser);
 CCSPageRef PageForWebContents(content::WebContents* contents);
+bool HidesContextMenuCommand(int command_id);
 content::WebContents* PageWebContents(CCSPageRef page);
 bool PageAcceptsPromptResult(CCSPageRef page,
                              content::WebContents* contents);

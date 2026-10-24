@@ -1,0 +1,148 @@
+diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+index 835dd9a..4be626b 100644
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -106,6 +106,9 @@
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
+@@ -3716,6 +3719,13 @@ ui::ImageModel RenderViewContextMenu::GetIconForCommandId(
+ }
+ 
+ bool RenderViewContextMenu::IsCommandIdVisible(int id) const {
++#if BUILDFLAG(IS_MAC)
++  // Covers submenu entries; the Cocoa menu removes top-level ones.
++  if (cobble_chromium::HidesContextMenuCommand(id) &&
++      cobble_chromium::PageForWebContents(source_web_contents_)) {
++    return false;
++  }
++#endif
+   if (ContextMenuMatcher::IsExtensionsCustomCommandId(id)) {
+     return extension_items_.IsCommandIdVisible(id);
+   }
+diff --git a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
+index 10829d1..fec5bef 100644
+--- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
++++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
+@@ -14,14 +14,19 @@
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/task/current_thread.h"
+ #include "chrome/browser/headless/headless_mode_util.h"
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
+ #import "components/remote_cocoa/app_shim/menu_controller_cocoa_delegate_impl.h"
++#include "components/remote_cocoa/common/menu.mojom.h"
+ #include "content/public/browser/web_contents.h"
+ #include "ui/base/cocoa/menu_utils.h"
+ #include "ui/base/interaction/element_tracker_mac.h"
+ #include "ui/color/color_provider.h"
+ #import "ui/menus/cocoa/menu_controller.h"
++#include "ui/views/badge_painter.h"
++#include "ui/views/controls/menu/menu_config.h"
+ #include "ui/views/controls/menu/menu_controller_cocoa_delegate_params.h"
+ #include "ui/views/interaction/element_tracker_views.h"
++#include "ui/views/layout/layout_provider.h"
+ #include "ui/views/widget/widget.h"
+ 
+ namespace {
+@@ -52,6 +57,54 @@
+   return nil;
+ }
+ 
++// Cobble hosts pages in its own AppKit windows, which have no views::Widget.
++// Matches views::MenuControllerParamsForWidget() with the page's colors.
++remote_cocoa::mojom::MenuControllerParamsPtr CobbleMenuControllerParams(
++    const ui::ColorProvider& color_provider) {
++  auto params = remote_cocoa::mojom::MenuControllerParams::New();
++  params->badge_font =
++      views::BadgePainter::GetBadgeFont(views::MenuConfig::instance().font_list)
++          .GetPrimaryFont();
++  params->badge_color =
++      color_provider.GetColor(ui::kColorBadgeInCocoaMenuBackground);
++  params->badge_text_color =
++      color_provider.GetColor(ui::kColorBadgeInCocoaMenuForeground);
++  params->badge_horizontal_margin = views::BadgePainter::kBadgeHorizontalMargin;
++  params->badge_internal_padding = views::BadgePainter::kBadgeInternalPadding;
++  params->badge_min_height = views::BadgePainter::kBadgeMinHeightCocoa;
++  params->badge_radius = base::checked_cast<uint32_t>(
++      views::LayoutProvider::Get()->GetCornerRadiusMetric(
++          views::ShapeContextTokens::kBadgeRadius));
++  params->iph_dot_color =
++      color_provider.GetColor(ui::kColorButtonBackgroundProminent);
++  return params;
++}
++
++// Removes top-level commands Cobble does not host and the separators they
++// leave at either end or next to each other.
++void RemoveCobbleHiddenItems(ui::SimpleMenuModel& model) {
++  for (size_t index = model.GetItemCount(); index > 0; --index) {
++    if (cobble_chromium::HidesContextMenuCommand(
++            model.GetCommandIdAt(index - 1))) {
++      model.RemoveItemAt(index - 1);
++    }
++  }
++  bool after_separator = true;
++  for (size_t index = 0; index < model.GetItemCount();) {
++    const bool separator =
++        model.GetTypeAt(index) == ui::MenuModel::TYPE_SEPARATOR;
++    if (separator && after_separator) {
++      model.RemoveItemAt(index);
++      continue;
++    }
++    after_separator = separator;
++    ++index;
++  }
++  if (after_separator && model.GetItemCount() > 0) {
++    model.RemoveItemAt(model.GetItemCount() - 1);
++  }
++}
++
+ }  // namespace
+ 
+ // Obj-C bridge class that is the target of all items in the context menu.
+@@ -77,13 +130,23 @@
+ void RenderViewContextMenuMacCocoa::Show() {
+   views::Widget* widget = views::Widget::GetTopLevelWidgetForNativeView(
+       source_web_contents_->GetNativeView());
++  const bool cobble_page =
++      !widget && cobble_chromium::PageForWebContents(source_web_contents_);
+ 
+-  if (!widget || headless::IsHeadlessMode()) {
++  if ((!widget && !cobble_page) || headless::IsHeadlessMode()) {
+     return;
+   }
++  if (cobble_page) {
++    RemoveCobbleHiddenItems(menu_model_);
++    if (menu_model_.GetItemCount() == 0) {
++      return;
++    }
++  }
+ 
+   menu_controller_delegate_ = [[MenuControllerCocoaDelegateImpl alloc]
+-      initWithParams:MenuControllerParamsForWidget(widget)];
++      initWithParams:widget ? MenuControllerParamsForWidget(widget)
++                            : CobbleMenuControllerParams(
++                                  source_web_contents_->GetColorProvider())];
+   menu_controller_ =
+       [[MenuControllerCocoa alloc] initWithModel:&menu_model_
+                                    isContextMenu:YES
+@@ -95,9 +158,11 @@
+   NSEvent* clickEvent = ui::EventForPositioningContextMenuRelativeToWindow(
+       position, [parent_view_ window]);
+ 
+-  ui::ShowContextMenu(menu_controller_.menu, clickEvent, parent_view_,
+-                      /*allow_nested_tasks=*/true,
+-                      views::ElementTrackerViews::GetContextForWidget(widget));
++  ui::ShowContextMenu(
++      menu_controller_.menu, clickEvent, parent_view_,
++      /*allow_nested_tasks=*/true,
++      widget ? views::ElementTrackerViews::GetContextForWidget(widget)
++             : ui::ElementContext());
+ }
+ 
+ void RenderViewContextMenuMacCocoa::CancelToolkitMenu() {
