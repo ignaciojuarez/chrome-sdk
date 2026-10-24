@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-index 835dd9a..4be626b 100644
+index 835dd9a..df9bafe 100644
 --- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
 +++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
 @@ -106,6 +106,9 @@
@@ -12,14 +12,13 @@ index 835dd9a..4be626b 100644
  #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
-@@ -3716,6 +3719,13 @@ ui::ImageModel RenderViewContextMenu::GetIconForCommandId(
+@@ -3716,6 +3719,12 @@ ui::ImageModel RenderViewContextMenu::GetIconForCommandId(
  }
  
  bool RenderViewContextMenu::IsCommandIdVisible(int id) const {
 +#if BUILDFLAG(IS_MAC)
 +  // Covers submenu entries; the Cocoa menu removes top-level ones.
-+  if (cobble_chromium::HidesContextMenuCommand(id) &&
-+      cobble_chromium::PageForWebContents(source_web_contents_)) {
++  if (cobble_chromium::HidesContextMenuCommand(id, source_web_contents_)) {
 +    return false;
 +  }
 +#endif
@@ -27,7 +26,7 @@ index 835dd9a..4be626b 100644
      return extension_items_.IsCommandIdVisible(id);
    }
 diff --git a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
-index 10829d1..fec5bef 100644
+index 10829d1..449af1e 100644
 --- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
 +++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
 @@ -14,14 +14,19 @@
@@ -50,7 +49,7 @@ index 10829d1..fec5bef 100644
  #include "ui/views/widget/widget.h"
  
  namespace {
-@@ -52,6 +57,54 @@
+@@ -52,6 +57,55 @@
    return nil;
  }
  
@@ -79,10 +78,11 @@ index 10829d1..fec5bef 100644
 +
 +// Removes top-level commands Cobble does not host and the separators they
 +// leave at either end or next to each other.
-+void RemoveCobbleHiddenItems(ui::SimpleMenuModel& model) {
++void RemoveCobbleHiddenItems(ui::SimpleMenuModel& model,
++                             content::WebContents* contents) {
 +  for (size_t index = model.GetItemCount(); index > 0; --index) {
 +    if (cobble_chromium::HidesContextMenuCommand(
-+            model.GetCommandIdAt(index - 1))) {
++            model.GetCommandIdAt(index - 1), contents)) {
 +      model.RemoveItemAt(index - 1);
 +    }
 +  }
@@ -105,7 +105,7 @@ index 10829d1..fec5bef 100644
  }  // namespace
  
  // Obj-C bridge class that is the target of all items in the context menu.
-@@ -77,13 +130,23 @@
+@@ -77,13 +131,23 @@
  void RenderViewContextMenuMacCocoa::Show() {
    views::Widget* widget = views::Widget::GetTopLevelWidgetForNativeView(
        source_web_contents_->GetNativeView());
@@ -117,7 +117,7 @@ index 10829d1..fec5bef 100644
      return;
    }
 +  if (cobble_page) {
-+    RemoveCobbleHiddenItems(menu_model_);
++    RemoveCobbleHiddenItems(menu_model_, source_web_contents_);
 +    if (menu_model_.GetItemCount() == 0) {
 +      return;
 +    }
@@ -131,7 +131,7 @@ index 10829d1..fec5bef 100644
    menu_controller_ =
        [[MenuControllerCocoa alloc] initWithModel:&menu_model_
                                     isContextMenu:YES
-@@ -95,9 +158,11 @@
+@@ -95,9 +159,11 @@
    NSEvent* clickEvent = ui::EventForPositioningContextMenuRelativeToWindow(
        position, [parent_view_ window]);
  

@@ -220,6 +220,14 @@ bool HasPendingOwnedDevTools(content::WebContents* inspected) {
          });
 }
 
+bool HasOpenOwnedDevTools(content::WebContents* inspected) {
+  return inspected &&
+         std::ranges::any_of(Sessions(), [inspected](const auto& session) {
+           return !session->closed && !session->closing &&
+                  session->inspected == inspected;
+         });
+}
+
 BrowserWindowInterface* CreateOwnedDevToolsBrowser(
     Profile* profile,
     content::WebContents* inspected) {

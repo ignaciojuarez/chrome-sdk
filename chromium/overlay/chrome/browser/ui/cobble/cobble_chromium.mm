@@ -1984,7 +1984,10 @@ CCSPageRef PageForWebContents(content::WebContents* contents) {
   return FindPage(contents);
 }
 
-bool HidesContextMenuCommand(int command_id) {
+bool HidesContextMenuCommand(int command_id, content::WebContents* contents) {
+  if (!FindPage(contents)) {
+    return false;
+  }
   // Cobble pages live in its own tabs and windows. Hide page-menu commands
   // that need Chrome windows, profiles, side panels, bubbles, settings pages,
   // sync, the password manager or AI features, which Cobble does not host.
@@ -1994,6 +1997,12 @@ bool HidesContextMenuCommand(int command_id) {
     return true;
   }
   switch (command_id) {
+    // Inspect reuses DevTools that Cobble opened for this page. Otherwise it
+    // would create an unhosted Chrome DevTools window.
+    case IDC_CONTENT_CONTEXT_INSPECTELEMENT:
+    case IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS:
+      return !HasOpenOwnedDevTools(contents);
+    case IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE:
     case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
     case IDC_CONTENT_CONTEXT_OPENLINKINPROFILE:
