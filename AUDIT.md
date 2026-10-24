@@ -85,7 +85,7 @@ implementation, and regression test are all required before enabling a surface.
 | U06 | Qualify | Native edit menu cut/copy/paste/undo/redo, spelling/dictionary suggestions, first responder routing and disabled-item state |
 | U07 | Qualify | Keyboard shortcuts, dead keys, CJK IME composition and keyboard-only tab movement |
 | U08 | Qualify | VoiceOver tree, focus announcements, zoom, high contrast and reduced motion |
-| U09 | Partial | Chrome's native page menu shows in host-owned AppKit windows, which have no views widget; commands for Chrome windows, profiles, panels, bubbles, settings, sync, passwords, AI and View Source are hidden. Drag/drop across app-owned windows still needs qualification |
+| U09 | Partial | Chrome's native page menu shows in host-owned AppKit windows, which have no views widget; commands for Chrome windows, profiles, panels, bubbles, settings, sync, passwords, AI and View Source are hidden. Chrome toasts such as “Image copied” are skipped because they have no BrowserView anchor and otherwise crash. Drag/drop across app-owned windows still needs qualification |
 | U10 | Present | Bounded viewport PNG capture; navigation/close/shutdown cancellation lives natively |
 | U11 | Present | Current DOM and native MHTML archive with bounded native operations |
 | U12 | Missing | Print-to-PDF data API; existing `printPage` delegates to native printing |

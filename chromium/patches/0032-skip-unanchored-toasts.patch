@@ -1,0 +1,26 @@
+diff --git a/chrome/browser/ui/toasts/toast_controller.cc b/chrome/browser/ui/toasts/toast_controller.cc
+index 4ea7cb8..66077ba 100644
+--- a/chrome/browser/ui/toasts/toast_controller.cc
++++ b/chrome/browser/ui/toasts/toast_controller.cc
+@@ -51,6 +51,7 @@
+ #include "ui/views/widget/widget.h"
+ 
+ #if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
+ #include "chrome/browser/ui/fullscreen_util_mac.h"
+ #endif
+ 
+@@ -122,6 +123,13 @@ bool ToastController::IsShowingToast() const {
+ }
+ 
+ bool ToastController::CanShowToast(ToastId toast_id) const {
++#if BUILDFLAG(IS_MAC)
++  // Cobble windows have no BrowserView to anchor a toast, and CreateToast()
++  // only tolerates a missing anchor in tests.
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+   if (static_cast<toasts::ToastAlertLevel>(
+           g_browser_process->local_state()->GetInteger(
+               prefs::kToastAlertLevel)) ==
