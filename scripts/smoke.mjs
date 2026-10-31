@@ -327,8 +327,11 @@ export async function startFixture(token, downloadDirectory) {
           let outcome = "unavailable";
           if (name === "fullscreen") {
             outcome = await settle(document.documentElement.requestFullscreen());
-            document.body.dataset.fullscreenDenied =
-              String(outcome === "rejected" && !document.fullscreenElement);
+            const entered = outcome === "resolved" &&
+              document.fullscreenElement === document.documentElement;
+            document.body.dataset.fullscreenEnteredAndExited = String(entered &&
+              await settle(document.exitFullscreen()) === "resolved" &&
+              !document.fullscreenElement);
           } else if (name === "pointer") {
             outcome = await settle(document.body.requestPointerLock());
             document.body.dataset.pointerDenied =
@@ -2189,7 +2192,7 @@ async function main() {
       "fileChooserPromptMoveRejected", "fileChooserMoveAfterResolution",
       "fileChooserPromptDevToolsRejected",
       "folderUploadEnumeratesNestedRelativePaths",
-      "fullscreenDenied", "pointerLockDenied", "keyboardLockDeniedWithoutKeyCapture",
+      "fullscreenEnteredAndExited", "pointerLockDenied", "keyboardLockDeniedWithoutKeyCapture",
       "deviceAndPaymentRequestsSettleDenied", "exclusivePageVisible",
       "pictureInPictureDeniedNoWindow", "documentPictureInPictureDeniedNoWindow",
       "displayMediaDeniedNoPicker",

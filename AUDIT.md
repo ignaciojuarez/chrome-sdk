@@ -90,7 +90,7 @@ implementation, and regression test are all required before enabling a surface.
 | U11 | Present | Current DOM and native MHTML archive with bounded native operations |
 | U12 | Missing | Print-to-PDF data API; existing `printPage` delegates to native printing |
 | U13 | Qualify | Printing page ranges, cancellation, background tab and missing-printer cases |
-| U14 | Missing | Web fullscreen with origin disclosure, Escape handling, navigation and tab-close cleanup |
+| U14 | Implemented | Page fullscreen moves the page into its own native fullscreen Space with an origin banner; Esc, page exit, macOS exit, navigation and tab close return it to its container. Real-site qualification pending |
 | U15 | Missing | Pointer lock with explicit origin disclosure and guaranteed unlock |
 | U16 | Missing | Keyboard lock with an escape mechanism independent of the renderer |
 | U17 | Missing | Owned Picture-in-Picture lifecycle and state/events |

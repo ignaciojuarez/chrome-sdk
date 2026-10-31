@@ -1272,7 +1272,8 @@ enum HarnessValidation {
                 exclusiveDOM.contains("data-focused=\"true\"") &&
                 exclusiveDOM.contains("data-viewport=\"true\"") &&
                 exclusiveDOM.contains("data-fullscreen-enabled=\"true\"")
-            checks["fullscreenDenied"] = exclusiveDOM.contains("data-fullscreen-denied=\"true\"")
+            checks["fullscreenEnteredAndExited"] =
+                exclusiveDOM.contains("data-fullscreen-entered-and-exited=\"true\"")
             checks["pointerLockDenied"] = exclusiveDOM.contains("data-pointer-denied=\"true\"")
             checks["keyboardLockDeniedWithoutKeyCapture"] =
                 exclusiveDOM.contains("data-keyboard-denied=\"true\"") &&
