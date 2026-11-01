@@ -68,7 +68,7 @@ implementation, and regression test are all required before enabling a surface.
 | R12 | Implemented | ABI 18 progress and native document readiness, including native BFCache-aware query; mapped into Cobble progress state |
 | R13 | Missing | Host navigation policy for ordinary navigations/redirects; popup policy is a separate path |
 | R14 | Implemented | Bounded native back/forward snapshots and stable-entry selection; entries absent from this page are refused, local files still require descriptor authorization |
-| R15 | Implemented | ABI 18 primary-renderer termination status and responsiveness; deterministic crash fixture passed; genuine hang/recovery still requires qualification |
+| R15 | Implemented | ABI 18 primary-renderer termination status and responsiveness; deterministic crash fixture passed. Chrome's sad-tab view is skipped in host-owned windows, which have no BrowserView; installing it there crashed the browser. Genuine hang/recovery still requires qualification |
 | R16 | Host | Workspace/session restoration policy; preserve private-tab exclusion and URL-only recovery |
 | R17 | Qualify | Engine crash recovery, network-service/GPU restart and suspended-machine recovery |
 | R18 | Missing | Per-operation cancellation for async DOM/archive/snapshot/data calls; retain native callback storage until acknowledgement |
