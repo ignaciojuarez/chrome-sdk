@@ -227,21 +227,7 @@ diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_content
    exclusive_access_manager_->keyboard_lock_controller()->RequestKeyboardLock(
        web_contents, esc_key_locked);
  }
-@@ -1197,6 +1217,13 @@ ui::mojom::WindowShowState BrowserWebContentsDelegate::GetWindowShowState()
- 
- bool BrowserWebContentsDelegate::CanEnterFullscreenModeForTab(
-     content::RenderFrameHost* requesting_frame) {
-+#if BUILDFLAG(IS_MAC)
-+  if (requesting_frame && cobble_chromium::PageForWebContents(
-+                              content::WebContents::FromRenderFrameHost(
-+                                  requesting_frame))) {
-+    return false;
-+  }
-+#endif
-   // If the tab strip isn't editable then a drag session is in progress, and it
-   // is not safe to enter fullscreen. https://crbug.com/40059349
-   if (!browser_->GetTabStripModel()->delegate()->IsTabStripEditable()) {
-@@ -1417,7 +1444,14 @@ void BrowserWebContentsDelegate::RequestMediaAccessPermission(
+@@ -1417,7 +1437,14 @@ void BrowserWebContentsDelegate::RequestMediaAccessPermission(
  void BrowserWebContentsDelegate::RequestMediaAccessPermission(
      content::WebContents* web_contents,
      const content::MediaStreamRequest& request,

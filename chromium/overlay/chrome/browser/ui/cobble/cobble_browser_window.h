@@ -96,9 +96,12 @@ class CobbleLocationBar final : public LocationBar {
   raw_ptr<Browser> browser_;
 };
 
+class CobbleContentFullscreen;
+
 class CobbleExclusiveAccessContext final : public ExclusiveAccessContext {
  public:
   explicit CobbleExclusiveAccessContext(Browser* browser);
+  ~CobbleExclusiveAccessContext() override;
   Profile* GetProfile() override;
   bool IsFullscreen() const override;
   void EnterFullscreen(const url::Origin& origin,
@@ -116,6 +119,9 @@ class CobbleExclusiveAccessContext final : public ExclusiveAccessContext {
 
  private:
   raw_ptr<Browser> browser_;
+  // Page fullscreen moves the requesting page into its own native fullscreen
+  // window, leaving Cobble's chrome and window state untouched.
+  std::unique_ptr<CobbleContentFullscreen> fullscreen_;
 };
 
 class CobbleModalDialogHost final

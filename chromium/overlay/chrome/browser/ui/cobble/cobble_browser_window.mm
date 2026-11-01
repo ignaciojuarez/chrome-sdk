@@ -17,6 +17,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/cobble/cobble_chromium.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
+#include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
@@ -33,6 +35,240 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/range/range.h"
 #include "ui/native_theme/native_theme.h"
+
+// Moves one page view into its own native fullscreen Space, as WebKit does,
+// and returns it to its Cobble container afterwards. The window keeps a
+// hidden titlebar because macOS fullscreen Spaces require a titled window.
+// The page view claims every key equivalent for the renderer, and Cobble routes
+// browser shortcuts only in its own windows. Offer them to the menu first so
+// Exit Full Screen, Quit and editing commands keep working.
+@interface CobbleContentFullscreenWindow : NSWindow
+@end
+
+@implementation CobbleContentFullscreenWindow
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+  return [NSApp.mainMenu performKeyEquivalent:event] ||
+         [super performKeyEquivalent:event];
+}
+@end
+
+@interface CobbleContentFullscreenController : NSObject <NSWindowDelegate>
+@property(nonatomic, readonly, getter=isActive) BOOL active;
+- (instancetype)initWithPage:(NSView*)page
+                      origin:(NSString*)origin
+                    onChange:(void (^)(void))onChange
+                  onUserExit:(void (^)(void))onUserExit;
+- (void)exitFullscreen;
+// Restores the page synchronously without calling back into Chromium.
+- (void)abandon;
+@end
+
+@implementation CobbleContentFullscreenController {
+  NSWindow* __strong _window;
+  NSView* __strong _page;
+  NSView* __weak _home;
+  NSString* __strong _origin;
+  void (^_onChange)(void);
+  void (^_onUserExit)(void);
+  BOOL _entering;
+  BOOL _exiting;
+}
+
+- (instancetype)initWithPage:(NSView*)page
+                      origin:(NSString*)origin
+                    onChange:(void (^)(void))onChange
+                  onUserExit:(void (^)(void))onUserExit {
+  if ((self = [super init])) {
+    _page = page;
+    _home = page.superview;
+    _origin = origin;
+    _onChange = [onChange copy];
+    _onUserExit = [onUserExit copy];
+    _entering = YES;
+    const NSRect frame = page.window ? page.window.frame
+                                     : NSScreen.mainScreen.frame;
+    _window = [[CobbleContentFullscreenWindow alloc]
+        initWithContentRect:frame
+                  styleMask:NSWindowStyleMaskTitled |
+                            NSWindowStyleMaskResizable |
+                            NSWindowStyleMaskFullSizeContentView
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    _window.releasedWhenClosed = NO;
+    _window.title = origin ?: @"";
+    _window.titleVisibility = NSWindowTitleHidden;
+    _window.titlebarAppearsTransparent = YES;
+    _window.backgroundColor = NSColor.blackColor;
+    _window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
+    _window.tabbingMode = NSWindowTabbingModeDisallowed;
+    _window.delegate = self;
+    [_window setFrame:frame display:NO];
+    for (NSWindowButton button : {NSWindowCloseButton,
+                                  NSWindowMiniaturizeButton,
+                                  NSWindowZoomButton}) {
+      [_window standardWindowButton:button].hidden = YES;
+    }
+    [page removeFromSuperview];
+    page.frame = _window.contentView.bounds;
+    page.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [_window.contentView addSubview:page];
+    [_window makeKeyAndOrderFront:nil];
+    [_window toggleFullScreen:nil];
+  }
+  return self;
+}
+
+- (BOOL)isActive {
+  return _window != nil;
+}
+
+- (void)exitFullscreen {
+  if (!_window || _exiting) {
+    return;
+  }
+  _exiting = YES;
+  if (_entering) {
+    return;  // The enter transition's completion finishes the exit.
+  }
+  if (_window.styleMask & NSWindowStyleMaskFullScreen) {
+    [_window toggleFullScreen:nil];
+  } else {
+    [self finish];
+  }
+}
+
+- (void)abandon {
+  _onChange = nil;
+  _onUserExit = nil;
+  [self restore];
+}
+
+// Returns whether the page went back into its Cobble container.
+- (BOOL)restore {
+  NSWindow* window = _window;
+  if (!window) {
+    return NO;
+  }
+  BOOL restored = NO;
+  _window = nil;
+  window.delegate = nil;
+  if (_page.window == window) {
+    [_page removeFromSuperview];
+    // If Cobble mounted another page meanwhile, it remounts this one later.
+    NSView* home = _home;
+    if (home && home.subviews.count == 0) {
+      _page.frame = home.bounds;
+      _page.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+      [home addSubview:_page];
+      restored = YES;
+    }
+  }
+  [window orderOut:nil];
+  [window close];
+  return restored;
+}
+
+- (void)finish {
+  if ([self restore]) {
+    [_page.window makeKeyAndOrderFront:nil];
+  }
+  if (_onChange) {
+    _onChange();
+  }
+}
+
+- (void)showDisclosure {
+  NSString* text =
+      _origin.length
+          ? [NSString stringWithFormat:@"%@ is full screen. Press Esc to exit.",
+                                       _origin]
+          : @"This page is full screen. Press Esc to exit.";
+  NSTextField* label = [NSTextField labelWithString:text];
+  label.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+  const NSSize size = label.fittingSize;
+  NSVisualEffectView* banner = [[NSVisualEffectView alloc]
+      initWithFrame:NSMakeRect(0, 0, size.width + 32, size.height + 16)];
+  banner.material = NSVisualEffectMaterialHUDWindow;
+  banner.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+  banner.state = NSVisualEffectStateActive;
+  banner.wantsLayer = YES;
+  banner.layer.cornerRadius = 10;
+  label.frameOrigin = NSMakePoint(16, 8);
+  [banner addSubview:label];
+  NSView* content = _window.contentView;
+  banner.frameOrigin =
+      NSMakePoint(NSMidX(content.bounds) - NSWidth(banner.frame) / 2,
+                  NSMaxY(content.bounds) - NSHeight(banner.frame) - 48);
+  banner.autoresizingMask =
+      NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin;
+  [content addSubview:banner];
+  NSAccessibilityPostNotificationWithUserInfo(
+      NSApp, NSAccessibilityAnnouncementRequestedNotification,
+      @{NSAccessibilityAnnouncementKey: text,
+        NSAccessibilityPriorityKey: @(NSAccessibilityPriorityMedium)});
+  NSView* __weak weakBanner = banner;
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
+      dispatch_get_main_queue(), ^{
+        [NSAnimationContext
+            runAnimationGroup:^(NSAnimationContext* context) {
+              context.duration = 0.3;
+              weakBanner.animator.alphaValue = 0;
+            }
+            completionHandler:^{
+              [weakBanner removeFromSuperview];
+            }];
+      });
+}
+
+- (void)windowDidEnterFullScreen:(NSNotification*)notification {
+  _entering = NO;
+  if (_exiting) {
+    [_window toggleFullScreen:nil];
+    return;
+  }
+  [self showDisclosure];
+  if (_onChange) {
+    _onChange();
+  }
+}
+
+- (void)windowDidFailToEnterFullScreen:(NSWindow*)window {
+  _entering = NO;
+  [self finish];
+}
+
+- (void)windowWillExitFullScreen:(NSNotification*)notification {
+  if (_exiting) {
+    return;
+  }
+  // The user left the Space with the menu, a gesture, or Mission Control.
+  _exiting = YES;
+  if (_onUserExit) {
+    _onUserExit();
+  }
+}
+
+- (void)windowDidExitFullScreen:(NSNotification*)notification {
+  [self finish];
+}
+
+- (void)windowDidFailToExitFullScreen:(NSWindow*)window {
+  [self finish];
+}
+
+@end
+
+class CobbleContentFullscreen {
+ public:
+  explicit CobbleContentFullscreen(CobbleContentFullscreenController* controller)
+      : controller_(controller) {}
+  ~CobbleContentFullscreen() { [controller_ abandon]; }
+  CobbleContentFullscreenController* controller() const { return controller_; }
+
+ private:
+  CobbleContentFullscreenController* __strong controller_;
+};
 
 namespace {
 
@@ -231,13 +467,52 @@ LocationBarTesting* CobbleLocationBar::GetLocationBarForTesting() {
 
 CobbleExclusiveAccessContext::CobbleExclusiveAccessContext(Browser* browser)
     : browser_(browser) {}
+CobbleExclusiveAccessContext::~CobbleExclusiveAccessContext() = default;
 Profile* CobbleExclusiveAccessContext::GetProfile() {
   return browser_->GetProfile();
 }
-bool CobbleExclusiveAccessContext::IsFullscreen() const { return false; }
+bool CobbleExclusiveAccessContext::IsFullscreen() const {
+  // Cobble owns window fullscreen; this reports page fullscreen only, so a
+  // page can still enter its own Space from a fullscreen Cobble window.
+  return fullscreen_ && [fullscreen_->controller() isActive];
+}
 void CobbleExclusiveAccessContext::EnterFullscreen(
-    const url::Origin&, ExclusiveAccessBubbleType, FullscreenTabParams) {}
-void CobbleExclusiveAccessContext::ExitFullscreen() {}
+    const url::Origin& origin, ExclusiveAccessBubbleType, FullscreenTabParams) {
+  content::WebContents* contents = GetWebContentsForExclusiveAccess();
+  NSView* page = contents ? contents->GetNativeView().GetNativeNSView() : nil;
+  if (IsFullscreen() || !page.superview) {
+    return;
+  }
+  Browser* browser = browser_;
+  base::WeakPtr<content::WebContents> weak_contents = contents->GetWeakPtr();
+  const std::string host = origin.host();
+  fullscreen_ = std::make_unique<CobbleContentFullscreen>(
+      [[CobbleContentFullscreenController alloc]
+          initWithPage:page
+                origin:host.empty() ? nil : base::SysUTF8ToNSString(host)
+              onChange:^{
+                if (weak_contents) {
+                  weak_contents->Focus();
+                }
+                if (ExclusiveAccessManager* manager =
+                        browser->GetFeatures().exclusive_access_manager()) {
+                  manager->fullscreen_controller()
+                      ->WindowFullscreenStateChanged();
+                }
+              }
+            onUserExit:^{
+              if (ExclusiveAccessManager* manager =
+                      browser->GetFeatures().exclusive_access_manager()) {
+                manager->ExitExclusiveAccess();
+              }
+            }]);
+  contents->Focus();
+}
+void CobbleExclusiveAccessContext::ExitFullscreen() {
+  if (fullscreen_) {
+    [fullscreen_->controller() exitFullscreen];
+  }
+}
 void CobbleExclusiveAccessContext::UpdateExclusiveAccessBubble(
     const ExclusiveAccessBubbleParams&,
     ExclusiveAccessBubbleHideCallback callback) {
@@ -254,8 +529,7 @@ CobbleExclusiveAccessContext::GetWebContentsForExclusiveAccess() {
   return browser_->tab_strip_model()->GetActiveWebContents();
 }
 bool CobbleExclusiveAccessContext::CanUserEnterFullscreen() const {
-  // Until the host supplies an origin disclosure UI, denying fullscreen is
-  // safer than entering an undisclosed exclusive-access state.
+  // Cobble owns browser-window fullscreen. Page fullscreen does not use this.
   return false;
 }
 bool CobbleExclusiveAccessContext::CanUserExitFullscreen() const { return true; }
