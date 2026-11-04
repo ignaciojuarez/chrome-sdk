@@ -187,8 +187,8 @@ nonisolated(unsafe) private var nativeHistoryEntryID: Int32 = 0
         }
         XCTAssertEqual(info.chromiumVersion, "153.0.8010.37")
         XCTAssertEqual(info.chromiumRevision, "fixture-revision")
-        XCTAssertEqual(info.abiVersion, 18)
-        runtime.api.get_runtime_info = { info in info?.pointee.abi_version = 17; return 1 }
+        XCTAssertEqual(info.abiVersion, 19)
+        runtime.api.get_runtime_info = { info in info?.pointee.abi_version = 18; return 1 }
         XCTAssertThrowsError(try runtime.runtimeInfo())
     }
 

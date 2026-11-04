@@ -104,9 +104,9 @@ implementation, and regression test are all required before enabling a surface.
 | --- | --- | --- |
 | P01 | Present | Camera/microphone prompt identities, stale-document rejection and cancellation |
 | P02 | Qualify | Real microphone/camera hardware, denied/revoked TCC, device loss and multiple captures |
-| P03 | Missing | Screen/window/tab capture chooser and visible capture indicator; device media is not display capture |
+| P03 | Implemented | ABI 19 routes `getDisplayMedia` to the host with origin/frame identity; the host chooses window or screen and the macOS content-sharing picker selects the source. Video only; tab capture and display/system audio are not offered. Capture state and stop are separate from camera/microphone. Fake-device fixture covers request, grant, state, stop and denial; real picker/site qualification pending |
 | P04 | Missing | Granular capture mute/stop controls; current stop terminates all user-media streams |
-| P05 | Missing | General permission check/request/result bridge with consistent revocation; the current runtime denies unowned permission prompts |
+| P05 | Missing | General permission check/request/result bridge with consistent revocation; the current runtime denies unowned permission prompts except window management, which ABI 19 routes to the host |
 | P06 | Missing | Geolocation consent, accuracy selection and revocation through owned UI |
 | P07 | Missing | Notification permission plus macOS notification delivery/click lifecycle |
 | P08 | Missing | Clipboard read permission UI and origin-bound cancellation |

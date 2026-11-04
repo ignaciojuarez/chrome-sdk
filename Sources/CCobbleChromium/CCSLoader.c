@@ -31,6 +31,8 @@ int32_t CCSLoadAPIFromHandle(void* library, CCSAPI* api, char* error, size_t cap
   RESOLVE(private_context, "CCSPrivateContext");
   RESOLVE(context_open, "CCSContextOpen");
   RESOLVE(context_release, "CCSContextRelease");
+  RESOLVE(context_reset_permission, "CCSContextResetPermission");
+  RESOLVE(context_set_permission_resolver, "CCSContextSetPermissionResolver");
   RESOLVE(context_set_identity_resolver, "CCSContextSetIdentityResolver");
   RESOLVE(page_create, "CCSPageCreate");
   RESOLVE(page_view, "CCSPageView");
@@ -59,6 +61,7 @@ int32_t CCSLoadAPIFromHandle(void* library, CCSAPI* api, char* error, size_t cap
   RESOLVE(page_set_audio_muted, "CCSPageSetAudioMuted");
   RESOLVE(page_is_audio_muted, "CCSPageIsAudioMuted");
   RESOLVE(page_stop_media_capture, "CCSPageStopMediaCapture");
+  RESOLVE(page_stop_display_capture, "CCSPageStopDisplayCapture");
   RESOLVE(page_close, "CCSPageClose");
   RESOLVE(page_force_close, "CCSPageForceClose");
   RESOLVE(page_is_closed, "CCSPageIsClosed");

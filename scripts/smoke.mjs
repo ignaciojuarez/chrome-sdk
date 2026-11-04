@@ -227,7 +227,40 @@ export async function startFixture(token, downloadDirectory) {
         ...headers,
         "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'",
       });
-      response.end(`<!doctype html><html data-run="${token}"><head>
+      const phase = url.searchParams.get("phase") ?? "";
+      const display = phase.startsWith("display");
+      // Stock Chromium asks only with a click; screens-again checks the
+      // session grant quietly on load.
+      response.end(phase.startsWith("screens") ? `<!doctype html><html data-run="${token}"><head>
+        <title>Cobble Screens Pending ${token}</title></head><body>
+        <button style="position:fixed;inset:0;width:100%;height:100%">Read screens</button><script>
+        const state = () => navigator.permissions.query({name: "window-management"}).then(status => status.state);
+        const read = () => getScreenDetails().then(async details => {
+          document.title = ${JSON.stringify(`Cobble Screens Granted ${token}`)} + " " +
+            (details.screens.length > 0) + " " + await state();
+        }, async error => {
+          document.title = ${JSON.stringify(`Cobble Screens Denied ${token}`)} + " " + error.name + " " + await state();
+        });
+        if (${JSON.stringify(phase)} === "screens-again") read();
+        else {
+          // The trusted click may land outside the button; any activation counts.
+          const waiting = setInterval(() => {
+            if (!navigator.userActivation.isActive) return;
+            clearInterval(waiting);
+            document.title = ${JSON.stringify(`Cobble Screens Asking ${token}`)};
+            read();
+          }, 20);
+        }
+        </script></body></html>` : display ? `<!doctype html><html data-run="${token}"><head>
+        <title>Cobble Display Pending ${token}</title></head><body><script>
+        navigator.mediaDevices.getDisplayMedia({video: true, audio: true}).then(stream => {
+          const [track] = stream.getVideoTracks();
+          window.cobbleDisplayStream = stream;
+          track.onended = () => { document.title = ${JSON.stringify(`Cobble Display Ended ${token}`)}; };
+          document.title = ${JSON.stringify(`Cobble Display Granted ${token}`)} + " " +
+            track.getSettings().displaySurface + " " + stream.getAudioTracks().length;
+        }, error => { document.title = ${JSON.stringify(`Cobble Display Denied ${token}`)} + " " + error.name; });
+        </script></body></html>` : `<!doctype html><html data-run="${token}"><head>
         <title>Cobble Media Pending ${token}</title></head><body><script>
         navigator.mediaDevices.getUserMedia({audio: true, video: true}).then(stream => {
           window.cobbleMediaStream = stream;
@@ -1633,6 +1666,33 @@ async function main() {
     });
     cdp = new CDPConnection(loopbackWebSocket(target.webSocketDebuggerUrl, devTools.port));
     await cdp.connect(options.timeoutMs);
+    // getScreenDetails asks only with transient activation, so the harness
+    // requests trusted clicks by writing trusted-click.json with an id.
+    const trustedClicks = (async () => {
+      const markerPath = join(options.artifactsPath, "trusted-click.json");
+      for (const id of ["1", "2", "3"]) {
+        const marker = await poll(`trusted click ${id}`, options.timeoutMs, async () => {
+          try {
+            const value = JSON.parse(await readFile(markerPath, "utf8"));
+            return value.id === id && value;
+          } catch { return false; }
+        });
+        const target = await poll(`trusted click ${id} target`, options.timeoutMs, async () =>
+          (await fetchJSON(`${devTools.baseURL}/json/list`)).find((item) =>
+            item.type === "page" && item.url === marker.url && item.webSocketDebuggerUrl));
+        const clickCDP = new CDPConnection(loopbackWebSocket(target.webSocketDebuggerUrl, devTools.port));
+        try {
+          await clickCDP.connect(options.timeoutMs);
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await clickCDP.send("Input.dispatchMouseEvent", { type, x: 40, y: 40, button: "left", clickCount: 1 });
+          }
+          await writeFile(join(options.artifactsPath, `trusted-click-${id}.done`), "clicked\n", { flag: "wx" });
+        } finally {
+          clickCDP.close();
+        }
+      }
+      return true;
+    })().then((passed) => ({ passed }), (error) => ({ passed: false, error }));
     const beforeUnloadActivation = (async () => {
       const marker = await poll("beforeunload activation marker", options.timeoutMs, async () => {
         try { return JSON.parse(await readFile(beforeUnloadMarkerPath, "utf8")); }
@@ -2116,6 +2176,9 @@ async function main() {
     const promptCrashResult = await promptCrash;
     assert(promptCrashResult.passed,
       `Prompt crash fixture failed: ${promptCrashResult.error?.message ?? "unknown error"}`);
+    const trustedClickResult = await trustedClicks;
+    assert(trustedClickResult.passed,
+      `Trusted click fixture failed: ${trustedClickResult.error?.message ?? "unknown error"}`);
     const beforeUnloadResult = await beforeUnloadActivation;
     assert(beforeUnloadResult.passed,
       `BeforeUnload activation fixture failed: ${beforeUnloadResult.error?.message ?? "unknown error"}`);
@@ -2176,6 +2239,11 @@ async function main() {
       "mediaPromptDevToolsRejected",
       "navigatedMediaRequestCancelled", "closedMediaRequestCancelled",
       "reentrantMediaCloseCancelledOnce",
+      "displayRequestMetadata", "displayRequiresSurface", "displayWindowGranted",
+      "displayCaptureStateReported", "displayCaptureStopped", "stopAllEndsDisplayCapture", "displayDenied",
+      "windowManagementRequestMetadata", "windowManagementRejectsSurface",
+      "windowManagementSavedDecisionsAnswerQuietly",
+      "windowManagementResetValidatesKind", "windowManagementResetAsksAgain", "windowManagementDeniedStoresNothing",
       "unhandledJavaScriptDialogDenied", "javaScriptPromptMetadata",
       "javaScriptPromptExactlyOnce", "javaScriptDialogNavigationCancelledOnce",
       "javaScriptPromptMoveRejected", "javaScriptMoveAfterResolution",

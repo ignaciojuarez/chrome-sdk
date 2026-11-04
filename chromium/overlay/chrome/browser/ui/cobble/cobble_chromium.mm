@@ -30,6 +30,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/uuid.h"
 #include "base/version_info/version_info.h"
@@ -37,6 +38,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
@@ -59,6 +61,7 @@
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/common/autofill_prefs.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/history/core/common/pref_names.h"
 #include "components/keep_alive_registry/keep_alive_registry.h"
 #include "components/find_in_page/find_result_observer.h"
@@ -66,6 +69,10 @@
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/favicon/core/favicon_driver_observer.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
+#include "components/permissions/contexts/window_management_permission_context.h"
+#include "components/permissions/permission_request.h"
+#include "components/permissions/permission_request_manager.h"
+#include "components/permissions/request_type.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_descriptor_util.h"
@@ -75,6 +82,8 @@
 #include "components/security_state/core/security_state.h"
 #include "net/cert/cert_status_flags.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/desktop_capture.h"
+#include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/media_stream_request.h"
 #include "content/public/browser/navigation_controller.h"
@@ -85,6 +94,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
 #include "media/base/media_switches.h"
+#include "media/mojo/mojom/display_media_information.mojom.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 #include "ui/base/page_transition_types.h"
@@ -101,6 +111,8 @@ struct CCSContext {
   raw_ptr<Profile> profile = nullptr;
   bool isolated_private = false;
   std::unique_ptr<ScopedProfileKeepAlive> original_profile_keep_alive;
+  CCSPermissionResolver permission_resolver = nullptr;
+  void* permission_resolver_data = nullptr;
 };
 
 struct BrowserEntry {
@@ -173,6 +185,10 @@ struct CCSPage final : public content::WebContentsObserver,
                                  bool capturing) override;
   void OnIsCapturingAudioChanged(content::WebContents* contents,
                                  bool capturing) override;
+  void OnIsCapturingWindowChanged(content::WebContents* contents,
+                                  bool capturing) override;
+  void OnIsCapturingDisplayChanged(content::WebContents* contents,
+                                   bool capturing) override;
   void OnFaviconUpdated(favicon::FaviconDriver* driver,
                         NotificationIconType icon_type,
                         const GURL& icon_url,
@@ -207,19 +223,33 @@ struct CCSMediaPermissionRequest {
   base::WeakPtr<CCSPage> page;
   content::GlobalRenderFrameHostToken frame_token;
   content::GlobalRenderFrameHostId frame_id;
-  content::MediaStreamRequest request;
+  // Exactly one of `request` (getUserMedia/getDisplayMedia) and `permission`
+  // (window management) is set.
+  std::optional<content::MediaStreamRequest> request;
   content::MediaResponseCallback callback;
+  std::unique_ptr<permissions::PermissionRequest> permission;
+  url::Origin origin;
   std::string requesting_origin;
   std::string embedding_origin;
   std::string frame_token_string;
   uint32_t kinds = 0;
   bool resolved = false;
+  // Display requests: the surface chosen by the host and the macOS picker
+  // session that must be closed unless a capture device adopts it.
+  content::DesktopMediaID::Type display_type = content::DesktopMediaID::TYPE_NONE;
+  std::optional<content::DesktopMediaID::Id> picker_session;
+  bool picker_open = false;
 
   CCSMediaPermissionRequest(uint64_t request_id,
                             base::WeakPtr<CCSPage> request_page,
                             content::RenderFrameHost* frame,
                             const content::MediaStreamRequest& media_request,
                             content::MediaResponseCallback media_callback);
+  CCSMediaPermissionRequest(
+      uint64_t request_id,
+      base::WeakPtr<CCSPage> request_page,
+      content::RenderFrameHost* frame,
+      std::unique_ptr<permissions::PermissionRequest> permission_request);
 };
 
 struct PendingPopup final : public content::WebContentsObserver {
@@ -270,18 +300,39 @@ CCSMediaPermissionRequest::CCSMediaPermissionRequest(
       frame_id(frame->GetGlobalId()),
       request(media_request),
       callback(std::move(media_callback)),
+      origin(media_request.url_origin),
       requesting_origin(media_request.url_origin.Serialize()),
       embedding_origin(frame->GetMainFrame()->GetLastCommittedOrigin().Serialize()),
       frame_token_string(frame_token.frame_token.value().ToString()) {
-  if (request.audio_type ==
+  if (media_request.audio_type ==
       blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE) {
     kinds |= CCS_MEDIA_PERMISSION_MICROPHONE;
   }
-  if (request.video_type ==
+  if (media_request.video_type ==
       blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE) {
     kinds |= CCS_MEDIA_PERMISSION_CAMERA;
   }
+  if (media_request.video_type ==
+      blink::mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE) {
+    kinds = CCS_MEDIA_PERMISSION_DISPLAY;
+  }
 }
+
+CCSMediaPermissionRequest::CCSMediaPermissionRequest(
+    uint64_t request_id,
+    base::WeakPtr<CCSPage> request_page,
+    content::RenderFrameHost* frame,
+    std::unique_ptr<permissions::PermissionRequest> permission_request)
+    : id(request_id),
+      page(std::move(request_page)),
+      frame_token(frame->GetGlobalFrameToken()),
+      frame_id(frame->GetGlobalId()),
+      permission(std::move(permission_request)),
+      origin(frame->GetLastCommittedOrigin()),
+      requesting_origin(origin.Serialize()),
+      embedding_origin(frame->GetMainFrame()->GetLastCommittedOrigin().Serialize()),
+      frame_token_string(frame_token.frame_token.value().ToString()),
+      kinds(CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT) {}
 
 namespace {
 
@@ -387,9 +438,33 @@ bool MediaRequestIsLive(const CCSMediaPermissionRequest& request) {
          frame == content::RenderFrameHost::FromID(request.frame_id) &&
          content::WebContents::FromRenderFrameHost(frame) ==
              request.page->web_contents() &&
-         frame->GetLastCommittedOrigin() == request.request.url_origin &&
+         frame->GetLastCommittedOrigin() == request.origin &&
          frame->GetMainFrame()->GetLastCommittedOrigin().Serialize() ==
              request.embedding_origin;
+}
+
+// Chromium creates its macOS picker only with this feature (patch 0034). There
+// is no other picker here, so display capture fails closed without it.
+bool NativeDisplayPickerAvailable() {
+  if (@available(macOS 14.0, *)) {
+    return base::FeatureList::IsEnabled(media::kUseSCContentSharingPicker);
+  }
+  return false;
+}
+
+bool IsCapturingDisplayMedia(content::WebContents* contents) {
+  auto indicator = MediaCaptureDevicesDispatcher::GetInstance()
+                       ->GetMediaStreamCaptureIndicator();
+  return indicator->IsCapturingWindow(contents) ||
+         indicator->IsCapturingDisplay(contents);
+}
+
+void CloseDisplayPicker(content::DesktopMediaID::Type type,
+                        content::DesktopMediaID::Id session) {
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
+      base::BindOnce(&content::desktop_capture::CloseNativeScreenCapturePicker,
+                     content::DesktopMediaID(type, session)));
 }
 
 void FinishMediaRequest(uint64_t id,
@@ -417,9 +492,26 @@ void FinishMediaRequest(uint64_t id,
     result = MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER;
   }
   if (result == MediaResult::OK && !MediaRequestIsLive(*request)) {
+    result = MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER;
+  }
+  if (result != MediaResult::OK && request->picker_session) {
+    // No capture device adopted the picker selection; release it now.
+    CloseDisplayPicker(request->display_type, *request->picker_session);
+  }
+  if (request->permission) {
+    // Chromium keeps only a one-time grant. The host remembers decisions and
+    // revokes with CCSContextResetPermission. A dismissal stores nothing.
+    if (result == MediaResult::OK) {
+      request->permission->PermissionGranted(std::monostate(),
+                                             /*is_one_time=*/true);
+    } else {
+      request->permission->Cancelled();
+    }
+    return;
+  }
+  if (result != MediaResult::OK) {
     const blink::mojom::StreamDevicesSet no_devices;
-    std::move(request->callback)
-        .Run(no_devices, MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER, nullptr);
+    std::move(request->callback).Run(no_devices, result, nullptr);
     return;
   }
   std::unique_ptr<content::MediaStreamUI> ui;
@@ -484,7 +576,7 @@ void ContinueAllowedMediaRequest(uint64_t id) {
   if (pending->kinds & CCS_MEDIA_PERMISSION_MICROPHONE) {
     stream->audio_device = dispatcher->GetPreferredAudioDeviceForBrowserContext(
         pending->page->web_contents()->GetBrowserContext(),
-        pending->request.requested_audio_device_ids);
+        pending->request->requested_audio_device_ids);
     if (!stream->audio_device) {
       FinishMediaRequest(id, MediaResult::NO_HARDWARE);
       return;
@@ -493,7 +585,7 @@ void ContinueAllowedMediaRequest(uint64_t id) {
   if (pending->kinds & CCS_MEDIA_PERMISSION_CAMERA) {
     stream->video_device = dispatcher->GetPreferredVideoDeviceForBrowserContext(
         pending->page->web_contents()->GetBrowserContext(),
-        pending->request.requested_video_device_ids);
+        pending->request->requested_video_device_ids);
     if (!stream->video_device) {
       FinishMediaRequest(id, MediaResult::NO_HARDWARE);
       return;
@@ -502,6 +594,104 @@ void ContinueAllowedMediaRequest(uint64_t id) {
   blink::mojom::StreamDevicesSet devices;
   devices.stream_devices.push_back(std::move(stream));
   FinishMediaRequest(id, MediaResult::OK, devices);
+}
+
+void FinishDisplayRequest(uint64_t id, const content::DesktopMediaID& media_id) {
+  blink::MediaStreamDevice device(
+      blink::mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE,
+      media_id.ToString(), media_id.ToString());
+  device.display_media_info = media::mojom::DisplayMediaInformation::New(
+      media_id.type == content::DesktopMediaID::TYPE_SCREEN
+          ? media::mojom::DisplayCaptureSurfaceType::MONITOR
+          : media::mojom::DisplayCaptureSurfaceType::WINDOW,
+      /*logical_surface=*/true, media::mojom::CursorCaptureType::ALWAYS,
+      /*capture_handle=*/nullptr, /*initial_zoom_level=*/100);
+  auto stream = blink::mojom::StreamDevices::New();
+  stream->video_device = std::move(device);
+  blink::mojom::StreamDevicesSet devices;
+  devices.stream_devices.push_back(std::move(stream));
+  FinishMediaRequest(id, MediaResult::OK, devices);
+}
+
+void DisplayPickerCreated(uint64_t id,
+                          content::DesktopMediaID::Type type,
+                          content::DesktopMediaID::Id session) {
+  CCSMediaPermissionRequest* pending = FindMediaRequest(id);
+  if (!pending) {
+    CloseDisplayPicker(type, session);
+    return;
+  }
+  pending->picker_session = session;
+}
+
+void DisplayPickerSelected(uint64_t id,
+                           content::DesktopMediaID::Type type,
+                           webrtc::DesktopCapturer::Source source) {
+  CCSMediaPermissionRequest* pending = FindMediaRequest(id);
+  if (!pending) {
+    CloseDisplayPicker(type, source.id);
+    return;
+  }
+  pending->picker_open = false;
+  pending->picker_session = source.id;
+  FinishDisplayRequest(id, content::DesktopMediaID(type, source.id));
+}
+
+void DisplayPickerEnded(uint64_t id, MediaResult result) {
+  if (CCSMediaPermissionRequest* pending = FindMediaRequest(id)) {
+    pending->picker_open = false;
+    FinishMediaRequest(id, result);
+  }
+}
+
+// Opens the macOS content-sharing picker for the surface the host allowed.
+// Selecting a source is the user's final consent; cancelling denies.
+void ContinueAllowedDisplayRequest(uint64_t id,
+                                   content::DesktopMediaID::Type type) {
+  CCSMediaPermissionRequest* pending = FindMediaRequest(id);
+  if (!pending || !MediaRequestIsLive(*pending)) {
+    if (pending) {
+      FinishMediaRequest(id, MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER);
+    }
+    return;
+  }
+  if (type == content::DesktopMediaID::TYPE_SCREEN &&
+      pending->request->exclude_monitor_type_surfaces) {
+    FinishMediaRequest(id, MediaResult::PERMISSION_DENIED);
+    return;
+  }
+  if (!NativeDisplayPickerAvailable()) {
+    FinishMediaRequest(id, MediaResult::PERMISSION_DENIED_BY_SYSTEM);
+    return;
+  }
+  pending->display_type = type;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kUseFakeDeviceForMediaStream)) {
+    FinishDisplayRequest(
+        id, content::DesktopMediaID(type, content::DesktopMediaID::kFakeId));
+    return;
+  }
+  // The system picker serves one selection at a time for the whole app.
+  if (std::ranges::any_of(State().media_requests, [](const auto& request) {
+        return request->picker_open;
+      })) {
+    FinishMediaRequest(id, MediaResult::INVALID_STATE);
+    return;
+  }
+  pending->picker_open = true;
+  auto ui = content::GetUIThreadTaskRunner({});
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &content::desktop_capture::OpenNativeScreenCapturePicker, type,
+          base::BindPostTask(ui, base::BindOnce(&DisplayPickerCreated, id, type)),
+          base::BindPostTask(ui,
+                             base::BindOnce(&DisplayPickerSelected, id, type)),
+          base::BindPostTask(ui, base::BindOnce(&DisplayPickerEnded, id,
+                                                MediaResult::PERMISSION_DENIED)),
+          base::BindPostTask(
+              ui, base::BindOnce(&DisplayPickerEnded, id,
+                                 MediaResult::PERMISSION_DENIED_BY_SYSTEM))));
 }
 
 void CancelMediaRequestsForPage(CCSPage* page) {
@@ -515,6 +705,100 @@ void CancelMediaRequestsForPage(CCSPage* page) {
     FinishMediaRequest(id, MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER,
                        /*notify_cancelled=*/true);
   }
+}
+
+void AskHostForMediaRequest(CCSPage* page,
+                            std::unique_ptr<CCSMediaPermissionRequest> pending,
+                            bool user_gesture) {
+  BridgeState& state = State();
+  CCSMediaPermissionRequest* handle = pending.get();
+  const uint64_t request_id = handle->id;
+  base::WeakPtr<CCSPage> live_page = page->weak_factory.GetWeakPtr();
+  state.media_requests.push_back(std::move(pending));
+  page->SendState();
+  handle = FindMediaRequest(request_id);
+  if (!live_page || !handle || !MediaRequestIsLive(*handle)) {
+    if (handle) {
+      FinishMediaRequest(request_id,
+                         MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER);
+    }
+    return;
+  }
+  const CCSMediaPermissionRequestV1 value = {
+      .struct_size = sizeof(CCSMediaPermissionRequestV1),
+      .request_id = handle->id,
+      .kinds = handle->kinds,
+      .requesting_origin_utf8 = handle->requesting_origin.c_str(),
+      .embedding_origin_utf8 = handle->embedding_origin.c_str(),
+      .frame_process_id = handle->frame_id.child_id.value(),
+      .frame_routing_id = handle->frame_id.frame_routing_id,
+      .frame_token_utf8 = handle->frame_token_string.c_str(),
+      .user_gesture = static_cast<uint8_t>(user_gesture),
+  };
+  state.client.media_permission_requested(state.client.user_data,
+                                          live_page.get(), handle, &value);
+}
+
+// Window management (getScreenDetails, cross-screen placement) asks the host
+// through the media permission callback. Every other prompt-backed permission
+// stays denied by --deny-permission-prompts.
+bool RoutePermissionRequest(
+    content::RenderFrameHost* frame,
+    std::unique_ptr<permissions::PermissionRequest>& request) {
+  CheckUIThread();
+  BridgeState& state = State();
+  if (request->request_type() !=
+          permissions::RequestType::kWindowManagement ||
+      !state.client.media_permission_requested || state.stopping) {
+    return false;
+  }
+  content::WebContents* contents =
+      content::WebContents::FromRenderFrameHost(frame);
+  CCSPage* page = contents ? FindPage(contents) : nullptr;
+  if (!page || !network::IsOriginPotentiallyTrustworthy(
+                   frame->GetLastCommittedOrigin())) {
+    return false;
+  }
+  const bool user_gesture = request->GetGestureType() ==
+                            permissions::PermissionRequestGestureType::GESTURE;
+  AskHostForMediaRequest(
+      page,
+      std::make_unique<CCSMediaPermissionRequest>(
+          state.next_media_request_id++, page->weak_factory.GetWeakPtr(),
+          frame, std::move(request)),
+      user_gesture);
+  return true;
+}
+
+// Saved host decisions answer Chromium's window-management status checks, so a
+// remembered allow or deny also holds for quiet checks and permissions.query.
+std::optional<ContentSetting> ResolveWindowManagementStatus(
+    content::BrowserContext* browser_context,
+    const GURL& requesting_origin,
+    const GURL& embedding_origin) {
+  CheckUIThread();
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  for (CCSContext* context : State().contexts) {
+    if (context->profile != profile || !context->permission_resolver) {
+      continue;
+    }
+    const std::string requesting =
+        url::Origin::Create(requesting_origin).Serialize();
+    const std::string embedding =
+        url::Origin::Create(embedding_origin).Serialize();
+    switch (context->permission_resolver(
+        context->permission_resolver_data,
+        CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT, requesting.c_str(),
+        embedding.c_str())) {
+      case 1:
+        return CONTENT_SETTING_ALLOW;
+      case 2:
+        return CONTENT_SETTING_BLOCK;
+      default:
+        return std::nullopt;
+    }
+  }
+  return std::nullopt;
 }
 
 BrowserEntry* EntryForBrowser(Browser* browser) {
@@ -934,6 +1218,8 @@ void CCSPage::SendState() {
       .navigation_error_code = navigation_error_code,
       .navigation_error_url_utf8 = error_url.c_str(),
       .navigation_error_description_utf8 = error_description.c_str(),
+      .capturing_display = static_cast<uint8_t>(
+          !crashed && IsCapturingDisplayMedia(web_contents())),
   };
   State().client.page_state_changed(State().client.user_data, this,
                                     &page_state);
@@ -1103,6 +1389,19 @@ void CCSPage::OnIsCapturingVideoChanged(content::WebContents* contents, bool) {
 }
 
 void CCSPage::OnIsCapturingAudioChanged(content::WebContents* contents, bool) {
+  if (contents == web_contents()) {
+    SendState();
+  }
+}
+
+void CCSPage::OnIsCapturingWindowChanged(content::WebContents* contents, bool) {
+  if (contents == web_contents()) {
+    SendState();
+  }
+}
+
+void CCSPage::OnIsCapturingDisplayChanged(content::WebContents* contents,
+                                          bool) {
   if (contents == web_contents()) {
     SendState();
   }
@@ -1353,6 +1652,10 @@ extern "C" int32_t CCSSetClient(const CCSClientV13* client) {
                      .first(copy_size));
   state.enabled = true;
   state.stopping = false;
+  permissions::PermissionRequestManager::SetEmbedderRequestRouter(
+      &RoutePermissionRequest);
+  permissions::WindowManagementPermissionContext::SetEmbedderStatusResolver(
+      &ResolveWindowManagementStatus);
   return 0;
 }
 
@@ -1468,6 +1771,40 @@ extern "C" void CCSContextOpen(const char* profile_key_utf8,
   State().pending_context_opens.push_back(pending);
   manager->CreateProfileAsync(
       path, base::BindOnce(&FinishPendingContextOpen, pending));
+}
+
+extern "C" void CCSContextSetPermissionResolver(CCSContextRef context,
+                                                void* user_data,
+                                                CCSPermissionResolver callback) {
+  CheckUIThread();
+  if (!context) {
+    return;
+  }
+  context->permission_resolver = callback;
+  context->permission_resolver_data = callback ? user_data : nullptr;
+}
+
+extern "C" uint8_t CCSContextResetPermission(CCSContextRef context,
+                                             const char* origin_utf8,
+                                             uint32_t kinds) {
+  CheckUIThread();
+  if (!context || !context->profile || !origin_utf8 ||
+      kinds != CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT) {
+    return 0;
+  }
+  const GURL url(origin_utf8);
+  const url::Origin origin = url::Origin::Create(url);
+  if (!url.is_valid() || origin.opaque() || origin.Serialize() != origin_utf8) {
+    return 0;
+  }
+  HostContentSettingsMapFactory::GetForProfile(context->profile)
+      ->ClearSettingsForOneTypeWithPredicate(
+          ContentSettingsType::WINDOW_MANAGEMENT,
+          [&url](const ContentSettingPatternSource& setting) {
+            return setting.primary_pattern != ContentSettingsPattern::Wildcard() &&
+                   setting.primary_pattern.Matches(url);
+          });
+  return 1;
 }
 
 extern "C" void CCSContextRelease(CCSContextRef context) {
@@ -1603,16 +1940,43 @@ extern "C" uint8_t CCSPageReload(CCSPageRef page) {
 
 extern "C" uint8_t CCSMediaPermissionResolve(
     CCSMediaPermissionRequestRef request,
-    uint8_t allow) {
+    uint8_t decision) {
   CheckUIThread();
   request = FindMediaRequest(request);
   if (!request || request->resolved || !MediaRequestIsLive(*request)) {
+    return 0;
+  }
+  // Display requests must name a picker surface; device requests must not.
+  const bool display = (request->kinds & CCS_MEDIA_PERMISSION_DISPLAY) != 0;
+  bool allow = true;
+  content::DesktopMediaID::Type surface = content::DesktopMediaID::TYPE_NONE;
+  switch (decision) {
+    case CCS_MEDIA_PERMISSION_DENY:
+      allow = false;
+      break;
+    case CCS_MEDIA_PERMISSION_ALLOW:
+      break;
+    case CCS_MEDIA_PERMISSION_ALLOW_WINDOW:
+      surface = content::DesktopMediaID::TYPE_WINDOW;
+      break;
+    case CCS_MEDIA_PERMISSION_ALLOW_SCREEN:
+      surface = content::DesktopMediaID::TYPE_SCREEN;
+      break;
+    default:
+      return 0;
+  }
+  if (allow &&
+      display != (surface != content::DesktopMediaID::TYPE_NONE)) {
     return 0;
   }
   request->resolved = true;
   const uint64_t id = request->id;
   if (!allow) {
     FinishMediaRequest(id, MediaResult::PERMISSION_DENIED);
+  } else if (display) {
+    ContinueAllowedDisplayRequest(id, surface);
+  } else if (request->permission) {
+    FinishMediaRequest(id, MediaResult::OK);
   } else {
     ContinueAllowedMediaRequest(id);
   }
@@ -1626,11 +1990,26 @@ extern "C" uint8_t CCSPageStopMediaCapture(CCSPageRef page) {
   }
   auto indicator = MediaCaptureDevicesDispatcher::GetInstance()
                        ->GetMediaStreamCaptureIndicator();
-  if (!indicator->IsCapturingUserMedia(page->web_contents())) {
+  if (!indicator->IsCapturingUserMedia(page->web_contents()) &&
+      !IsCapturingDisplayMedia(page->web_contents())) {
     return 0;
   }
-  indicator->StopMediaCapturing(page->web_contents(),
-                                MediaStreamCaptureIndicator::kUserMedia);
+  indicator->StopMediaCapturing(
+      page->web_contents(), MediaStreamCaptureIndicator::kUserMedia |
+                                MediaStreamCaptureIndicator::kDisplayMedia);
+  return 1;
+}
+
+extern "C" uint8_t CCSPageStopDisplayCapture(CCSPageRef page) {
+  CheckUIThread();
+  if (!page || page->closed || !page->web_contents() ||
+      !IsCapturingDisplayMedia(page->web_contents())) {
+    return 0;
+  }
+  MediaCaptureDevicesDispatcher::GetInstance()
+      ->GetMediaStreamCaptureIndicator()
+      ->StopMediaCapturing(page->web_contents(),
+                           MediaStreamCaptureIndicator::kDisplayMedia);
   return 1;
 }
 
@@ -1846,12 +2225,23 @@ bool HandleMediaAccessRequest(content::WebContents* contents,
                      blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE;
   const bool video = request.video_type ==
                      blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE;
+  // getDisplayMedia shares video only. Requested display audio is omitted from
+  // the stream, which the specification permits.
+  const bool display =
+      request.video_type ==
+          blink::mojom::MediaStreamType::DISPLAY_VIDEO_CAPTURE &&
+      request.request_type == blink::MEDIA_GENERATE_STREAM &&
+      (request.audio_type == blink::mojom::MediaStreamType::NO_SERVICE ||
+       request.audio_type ==
+           blink::mojom::MediaStreamType::DISPLAY_AUDIO_CAPTURE);
   const bool unsupported_audio =
-      request.audio_type != blink::mojom::MediaStreamType::NO_SERVICE && !audio;
+      request.audio_type != blink::mojom::MediaStreamType::NO_SERVICE &&
+      !audio && !display;
   const bool unsupported_video =
-      request.video_type != blink::mojom::MediaStreamType::NO_SERVICE && !video;
+      request.video_type != blink::mojom::MediaStreamType::NO_SERVICE &&
+      !video && !display;
   if (!page || !frame || content::WebContents::FromRenderFrameHost(frame) != contents ||
-      (!audio && !video) || unsupported_audio || unsupported_video ||
+      (!audio && !video && !display) || unsupported_audio || unsupported_video ||
       frame->GetLastCommittedOrigin() != request.url_origin ||
       !network::IsUrlPotentiallyTrustworthy(request.security_origin)) {
     std::move(callback).Run({}, MediaResult::NOT_SUPPORTED, nullptr);
@@ -1874,40 +2264,23 @@ bool HandleMediaAccessRequest(content::WebContents* contents,
     return true;
   }
 
+  if (display && !NativeDisplayPickerAvailable()) {
+    std::move(callback).Run({}, MediaResult::PERMISSION_DENIED_BY_SYSTEM,
+                            nullptr);
+    return true;
+  }
+
   BridgeState& state = State();
   if (!state.client.media_permission_requested || state.stopping) {
     std::move(callback).Run({}, MediaResult::PERMISSION_DENIED, nullptr);
     return true;
   }
-  auto pending = std::make_unique<CCSMediaPermissionRequest>(
-      state.next_media_request_id++, page->weak_factory.GetWeakPtr(), frame,
-      request, std::move(callback));
-  CCSMediaPermissionRequest* handle = pending.get();
-  const uint64_t request_id = handle->id;
-  base::WeakPtr<CCSPage> live_page = page->weak_factory.GetWeakPtr();
-  state.media_requests.push_back(std::move(pending));
-  page->SendState();
-  handle = FindMediaRequest(request_id);
-  if (!live_page || !handle || !MediaRequestIsLive(*handle)) {
-    if (handle) {
-      FinishMediaRequest(request_id,
-                         MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER);
-    }
-    return true;
-  }
-  const CCSMediaPermissionRequestV1 value = {
-      .struct_size = sizeof(CCSMediaPermissionRequestV1),
-      .request_id = handle->id,
-      .kinds = handle->kinds,
-      .requesting_origin_utf8 = handle->requesting_origin.c_str(),
-      .embedding_origin_utf8 = handle->embedding_origin.c_str(),
-      .frame_process_id = handle->frame_id.child_id.value(),
-      .frame_routing_id = handle->frame_id.frame_routing_id,
-      .frame_token_utf8 = handle->frame_token_string.c_str(),
-      .user_gesture = static_cast<uint8_t>(request.user_gesture),
-  };
-  state.client.media_permission_requested(state.client.user_data,
-                                          live_page.get(), handle, &value);
+  AskHostForMediaRequest(
+      page,
+      std::make_unique<CCSMediaPermissionRequest>(
+          state.next_media_request_id++, page->weak_factory.GetWeakPtr(),
+          frame, request, std::move(callback)),
+      request.user_gesture);
   return true;
 }
 

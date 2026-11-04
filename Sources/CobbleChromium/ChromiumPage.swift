@@ -78,6 +78,8 @@ public struct ChromiumConnectionDetails: Sendable {
     public private(set) var isAudioMuted = false
     public private(set) var isCapturingMicrophone = false
     public private(set) var isCapturingCamera = false
+    /// A window or screen stream from getDisplayMedia is live.
+    public private(set) var isCapturingDisplay = false
     public private(set) var faviconPNG: Data?
     public private(set) var hoveredLink: String?
     public private(set) var hasPendingPrompt = false
@@ -134,6 +136,7 @@ public struct ChromiumConnectionDetails: Sendable {
         isAudioMuted = state.audio_muted != 0
         isCapturingMicrophone = state.capturing_microphone != 0
         isCapturingCamera = state.capturing_camera != 0
+        isCapturingDisplay = state.capturing_display != 0
         if let bytes = state.favicon_png, state.favicon_png_size > 0 {
             faviconPNG = Data(bytes: bytes, count: state.favicon_png_size)
         } else {
@@ -449,6 +452,12 @@ public struct ChromiumConnectionDetails: Sendable {
     @discardableResult public func stopMediaCapture() -> Bool {
         guard !isClosed, !isClosing else { return false }
         return runtime.api.page_stop_media_capture?(handle) == 1
+    }
+
+    /// Stops every window and screen stream owned by this page.
+    @discardableResult public func stopDisplayCapture() -> Bool {
+        guard !isClosed, !isClosing else { return false }
+        return runtime.api.page_stop_display_capture?(handle) == 1
     }
 
     public func close() {

@@ -28,6 +28,25 @@ import CCobbleChromium
                 handle, callback == nil ? nil : Unmanaged.passUnretained(self).toOpaque(), callback)
         }
     }
+    /// Answers Chromium's window-management status checks, including quiet checks
+    /// on load and `permissions.query`, from the host's saved decisions. Called
+    /// synchronously on Chromium's UI thread with serialized origins; do not
+    /// navigate or close the context from it.
+    public var permissionResolver: ((ChromiumMediaPermissionKinds, String, String) -> ChromiumPermissionSetting)? {
+        didSet {
+            guard !isClosed else { return }
+            let callback: CCSPermissionResolver? = permissionResolver == nil ? nil : { data, kind, requesting, embedding in
+                MainActor.assumeIsolated {
+                    guard let data, let requesting, let embedding else { return ChromiumPermissionSetting.ask.rawValue }
+                    let context = Unmanaged<ChromiumContext>.fromOpaque(data).takeUnretainedValue()
+                    return (context.permissionResolver?(ChromiumMediaPermissionKinds(rawValue: kind),
+                        String(cString: requesting), String(cString: embedding)) ?? .ask).rawValue
+                }
+            }
+            runtime.api.context_set_permission_resolver?(
+                handle, callback == nil ? nil : Unmanaged.passUnretained(self).toOpaque(), callback)
+        }
+    }
     public var onExtensionsChanged: (() -> Void)? {
         didSet {
             guard !isClosed, privateWindowKey == nil else { return }
@@ -79,6 +98,13 @@ import CCobbleChromium
         return result
     }
 
+    /// Forgets Chromium's session grant for a serialized origin such as `https://example.com`.
+    /// Only `.windowManagement` is stored by Chromium.
+    @discardableResult public func resetPermission(_ kinds: ChromiumMediaPermissionKinds, origin: String) -> Bool {
+        guard !isClosed, kinds == .windowManagement else { return false }
+        return runtime.api.context_reset_permission?(handle, origin, kinds.rawValue) == 1
+    }
+
     func pageDidClose() {
         if closesWhenEmpty, !runtime.pages.values.contains(where: { $0.context === self && !$0.isClosed }) {
             Task { await close() }
@@ -88,6 +114,7 @@ import CCobbleChromium
     func release() {
         guard !isClosed else { return }
         identityResolver = nil
+        permissionResolver = nil
         onExtensionsChanged = nil
         isClosed = true
         isClosing = false

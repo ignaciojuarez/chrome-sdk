@@ -17,6 +17,8 @@ typedef struct CCSAPI {
   CCSContextRef (*private_context)(void);
   void (*context_open)(const char*, const char*, void*, CCSContextOpenedCallback);
   void (*context_release)(CCSContextRef);
+  uint8_t (*context_reset_permission)(CCSContextRef, const char*, uint32_t);
+  void (*context_set_permission_resolver)(CCSContextRef, void*, CCSPermissionResolver);
   void (*context_set_identity_resolver)(CCSContextRef, void*, CCSIdentityResolver);
   CCSPageRef (*page_create)(CCSContextRef, const char*, const char*);
   void* (*page_view)(CCSPageRef);
@@ -45,6 +47,7 @@ typedef struct CCSAPI {
   uint8_t (*page_set_audio_muted)(CCSPageRef, uint8_t);
   uint8_t (*page_is_audio_muted)(CCSPageRef);
   uint8_t (*page_stop_media_capture)(CCSPageRef);
+  uint8_t (*page_stop_display_capture)(CCSPageRef);
   void (*page_close)(CCSPageRef);
   void (*page_force_close)(CCSPageRef);
   uint8_t (*page_is_closed)(CCSPageRef);
