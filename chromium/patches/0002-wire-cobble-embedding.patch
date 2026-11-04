@@ -2,7 +2,7 @@ diff --git a/chrome/app/framework.exports b/chrome/app/framework.exports
 index 37c881f..67d8a66 100644
 --- a/chrome/app/framework.exports
 +++ b/chrome/app/framework.exports
-@@ -19,3 +19,71 @@
+@@ -19,3 +19,74 @@
  _ChromeAppModeStart_v8
  _ChromeMain
  _ChromeWebAppShortcutCopierMain
@@ -15,7 +15,9 @@ index 37c881f..67d8a66 100644
 +_CCSPrivateContext
 +_CCSContextOpen
 +_CCSContextRelease
++_CCSContextResetPermission
 +_CCSContextSetIdentityResolver
++_CCSContextSetPermissionResolver
 +_CCSDevToolsSessionClose
 +_CCSDevToolsSessionFocus
 +_CCSDevToolsSessionIsClosed
@@ -50,6 +52,7 @@ index 37c881f..67d8a66 100644
 +_CCSPageSetAudioMuted
 +_CCSPageIsAudioMuted
 +_CCSPageStopMediaCapture
++_CCSPageStopDisplayCapture
 +_CCSPageClose
 +_CCSPageForceClose
 +_CCSPageIsClosed

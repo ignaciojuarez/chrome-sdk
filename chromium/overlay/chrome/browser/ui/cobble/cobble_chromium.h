@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define CCS_ABI_VERSION 18u
+#define CCS_ABI_VERSION 19u
 // Chromium compiles with hidden visibility; the client resolves this ABI by name.
 #define CCS_EXPORT __attribute__((visibility("default")))
 
@@ -33,10 +33,40 @@ typedef struct CCSExtensionInstallRequest* CCSExtensionInstallRequestRef;
 // are treated as native identity.
 typedef int32_t (*CCSIdentityResolver)(void* user_data, const char* url_utf8);
 
+// ABI 19: synchronous on Chromium's UI thread whenever Chromium checks a
+// host-decided permission's status, including quiet checks without a prompt.
+// `kind` is a CCSMediaPermissionKind; only WINDOW_MANAGEMENT is asked today.
+// Return 1 for allowed, 2 for denied, or 0 to keep Chromium's session state.
+// Origin storage is valid only while the callback runs.
+typedef int32_t (*CCSPermissionResolver)(void* user_data,
+                                         uint32_t kind,
+                                         const char* requesting_origin_utf8,
+                                         const char* embedding_origin_utf8);
+
 typedef enum CCSMediaPermissionKind {
   CCS_MEDIA_PERMISSION_MICROPHONE = 1 << 0,
   CCS_MEDIA_PERMISSION_CAMERA = 1 << 1,
+  // ABI 19: getDisplayMedia. Never combined with camera or microphone. The
+  // stream carries video only; display and system audio are not shared.
+  CCS_MEDIA_PERMISSION_DISPLAY = 1 << 2,
+  // ABI 19: window management (getScreenDetails and cross-screen placement).
+  // Never combined with other kinds; accepts ALLOW or DENY. Chromium keeps an
+  // ALLOW for this browsing session only and stores no denial, so the host owns
+  // remembered decisions and revokes with CCSContextResetPermission.
+  CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT = 1 << 3,
 } CCSMediaPermissionKind;
+
+// ABI 19: CCSMediaPermissionResolve decisions. Camera, microphone and
+// window-management requests accept ALLOW. Display requests accept
+// ALLOW_WINDOW or ALLOW_SCREEN, which
+// opens the macOS content-sharing picker for that surface; cancelling the
+// picker denies the request.
+typedef enum CCSMediaPermissionDecision {
+  CCS_MEDIA_PERMISSION_DENY = 0,
+  CCS_MEDIA_PERMISSION_ALLOW = 1,
+  CCS_MEDIA_PERMISSION_ALLOW_WINDOW = 2,
+  CCS_MEDIA_PERMISSION_ALLOW_SCREEN = 3,
+} CCSMediaPermissionDecision;
 
 typedef struct CCSMediaPermissionRequestV1 {
   uint32_t struct_size;
@@ -254,6 +284,8 @@ typedef struct CCSPageStateV5 {
   int32_t navigation_error_code;
   const char* navigation_error_url_utf8;
   const char* navigation_error_description_utf8;
+  // ABI 19: a window or screen stream from getDisplayMedia is live.
+  uint8_t capturing_display;
 } CCSPageStateV5;
 
 typedef struct CCSRuntimeInfoV1 {
@@ -437,11 +469,24 @@ CCS_EXPORT void CCSContextOpen(const char* profile_key_utf8,
                     void* callback_data,
                     CCSContextOpenedCallback callback);
 CCS_EXPORT void CCSContextRelease(CCSContextRef context);
+// ABI 19: forgets Chromium's session grant of `kinds` for a serialized origin
+// such as "https://example.com". Only CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT is
+// accepted; Chromium stores no other host-decided permission. Returns zero for
+// an invalid context, origin or kind.
+CCS_EXPORT uint8_t CCSContextResetPermission(CCSContextRef context,
+                                             const char* origin_utf8,
+                                             uint32_t kinds);
 // Set before creating pages. Passing a null callback unregisters the resolver.
 // Do not navigate or release the context from inside the callback.
 CCS_EXPORT void CCSContextSetIdentityResolver(CCSContextRef context,
                                                void* user_data,
                                                CCSIdentityResolver callback);
+// ABI 19: answers permission status from the host's saved decisions. Passing a
+// null callback unregisters it. Do not navigate or release the context from
+// inside the callback.
+CCS_EXPORT void CCSContextSetPermissionResolver(CCSContextRef context,
+                                                void* user_data,
+                                                CCSPermissionResolver callback);
 
 CCS_EXPORT CCSPageRef CCSPageCreate(CCSContextRef context,
                                    const char* host_window_id_utf8,
@@ -516,9 +561,13 @@ CCS_EXPORT void CCSPageOpenLocalFile(CCSPageRef page,
 // alter microphone, tab, display, or system-audio capture.
 CCS_EXPORT uint8_t CCSPageSetAudioMuted(CCSPageRef page, uint8_t muted);
 CCS_EXPORT uint8_t CCSPageIsAudioMuted(CCSPageRef page);
-// Stops every camera/microphone stream owned by this page. Chromium does not
-// provide a safe per-track stop command at this boundary.
+// Stops every camera, microphone, window and screen stream owned by this page
+// (ABI 19 adds window and screen). Chromium does not provide a safe per-track
+// stop command at this boundary.
 CCS_EXPORT uint8_t CCSPageStopMediaCapture(CCSPageRef page);
+// ABI 19: stops every window/screen stream owned by this page. Returns zero
+// when the page has no live display capture.
+CCS_EXPORT uint8_t CCSPageStopDisplayCapture(CCSPageRef page);
 CCS_EXPORT void CCSPageClose(CCSPageRef page);
 // Bypasses beforeunload and immediately destroys a Browser-owned tab. If the
 // WebContents has already detached from its Browser, synchronously retires the
@@ -545,13 +594,14 @@ CCS_EXPORT uint8_t CCSDevToolsSessionClose(CCSDevToolsSessionRef session);
 CCS_EXPORT uint8_t CCSDevToolsSessionIsClosed(CCSDevToolsSessionRef session);
 CCS_EXPORT void CCSDevToolsSessionRelease(CCSDevToolsSessionRef session);
 
-// Resolves a pending camera/microphone request exactly once. Returns zero for
-// an unknown, already-resolved, or stale request. Allowed requests still pass
-// Chromium device availability, document/origin, Permissions Policy and macOS
-// system-permission checks.
+// Resolves a pending media request exactly once with a
+// CCSMediaPermissionDecision. Returns zero for an unknown, already-resolved,
+// or stale request, or a decision that does not match the request kind.
+// Allowed requests still pass Chromium device availability, document/origin,
+// Permissions Policy and macOS system-permission checks.
 CCS_EXPORT uint8_t CCSMediaPermissionResolve(
     CCSMediaPermissionRequestRef request,
-    uint8_t allow);
+    uint8_t decision);
 CCS_EXPORT uint8_t CCSJavaScriptDialogResolve(
     CCSJavaScriptDialogRequestRef request,
     uint8_t accept,

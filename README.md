@@ -4,7 +4,7 @@ A native macOS SDK built on Chromium, with a Swift API for embedding the browser
 
 | | |
 | --- | --- |
-| ABI | 18 (development; matched runtime required) |
+| ABI | 19 (development; matched runtime required) |
 | Engine | Chromium 153.0.8010.37, pinned in [`chromium.lock.json`](chromium.lock.json) |
 | Platform | Apple Silicon macOS |
 | Source | Swift 6, Objective-C++, C++, Python |
@@ -23,6 +23,22 @@ exact SDK commit, and Full packaging requires that commit’s matched runtime,
 ABI, source lock and native-payload hashes. Keep one incremental Chromium work
 directory outside Git. Keep packaged runtimes outside the source checkout and
 retain one rollback runtime instead of copying source/build trees.
+
+ABI 19 adds screen sharing. `getDisplayMedia` arrives as a
+`ChromiumMediaPermissionRequest` whose kinds are `.display`; the host answers
+with `allow(display: .window)` or `allow(display: .screen)`, which opens the
+macOS content-sharing picker for that surface. Cancelling the picker denies the
+page. Streams carry video only. `ChromiumPage.isCapturingDisplay` and
+`stopDisplayCapture()` report and end window/screen capture; `stopMediaCapture()`
+(stop-all) now ends them too. Without Chromium's macOS picker, display requests
+are refused before the host is asked. Window management (`getScreenDetails`)
+arrives as `.windowManagement` and accepts `allow()` or `deny()`. Set
+`ChromiumContext.permissionResolver` to answer status checks, including quiet
+checks on load, from saved decisions. Chromium keeps only a session grant for
+unsaved answers and stores no denial;
+`ChromiumContext.resetPermission(.windowManagement, origin:)` clears it. Other
+prompt-backed permissions stay denied. This client requires a rebuilt ABI 19
+runtime.
 
 ABI 18 adds `runtimeInfo()`, structured main-frame navigation failures,
 load progress/document readiness, primary-renderer health, native history entry

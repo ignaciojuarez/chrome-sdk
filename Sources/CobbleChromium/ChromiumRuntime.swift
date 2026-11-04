@@ -29,6 +29,23 @@ public struct ChromiumMediaPermissionKinds: OptionSet, Sendable {
     public init(rawValue: UInt32) { self.rawValue = rawValue }
     public static let microphone = Self(rawValue: UInt32(CCS_MEDIA_PERMISSION_MICROPHONE.rawValue))
     public static let camera = Self(rawValue: UInt32(CCS_MEDIA_PERMISSION_CAMERA.rawValue))
+    /// getDisplayMedia. Never combined with camera or microphone; the stream is video only.
+    public static let display = Self(rawValue: UInt32(CCS_MEDIA_PERMISSION_DISPLAY.rawValue))
+    /// getScreenDetails and cross-screen window placement. Never combined with other kinds.
+    /// Chromium keeps a grant for this browsing session only; revoke it with
+    /// `ChromiumContext.resetPermission(_:origin:)`.
+    public static let windowManagement = Self(rawValue: UInt32(CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT.rawValue))
+}
+
+/// A host's saved decision for a permission Chromium checks without asking.
+public enum ChromiumPermissionSetting: Int32, Sendable {
+    /// Keeps Chromium's session state: a one-time grant or a prompt.
+    case ask = 0, allow = 1, deny = 2
+}
+
+/// The surface a display request may choose in the macOS content-sharing picker.
+public enum ChromiumDisplaySurface: Sendable {
+    case window, screen
 }
 
 /// A browser identity for the next top-level navigation. The host chooses this

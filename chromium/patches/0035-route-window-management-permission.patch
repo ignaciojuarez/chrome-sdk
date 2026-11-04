@@ -1,0 +1,132 @@
+diff --git a/components/permissions/contexts/window_management_permission_context.cc b/components/permissions/contexts/window_management_permission_context.cc
+index 417e9716cb..3b3702b483 100644
+--- a/components/permissions/contexts/window_management_permission_context.cc
++++ b/components/permissions/contexts/window_management_permission_context.cc
+@@ -21,6 +21,17 @@
+ 
+ namespace permissions {
+ 
++namespace {
++WindowManagementPermissionContext::EmbedderStatusResolver
++    g_embedder_status_resolver = nullptr;
++}  // namespace
++
++// static
++void WindowManagementPermissionContext::SetEmbedderStatusResolver(
++    EmbedderStatusResolver resolver) {
++  g_embedder_status_resolver = resolver;
++}
++
+ namespace {
+ #if BUILDFLAG(IS_ANDROID)
+ constexpr char kWindowManagementHistogramName[] =
+@@ -63,6 +74,21 @@ WindowManagementPermissionContext::GetContentSettingStatusInternal(
+   NOTIMPLEMENTED_LOG_ONCE();
+   return CONTENT_SETTING_BLOCK;
+ }
++#else
++ContentSetting
++WindowManagementPermissionContext::GetContentSettingStatusInternal(
++    content::RenderFrameHost* render_frame_host,
++    const GURL& requesting_origin,
++    const GURL& embedding_origin) const {
++  if (g_embedder_status_resolver) {
++    if (std::optional<ContentSetting> setting = g_embedder_status_resolver(
++            browser_context(), requesting_origin, embedding_origin)) {
++      return *setting;
++    }
++  }
++  return ContentSettingPermissionContextBase::GetContentSettingStatusInternal(
++      render_frame_host, requesting_origin, embedding_origin);
++}
+ #endif  // IS_ANDROID
+ 
+ void WindowManagementPermissionContext::UserMadePermissionDecision(
+diff --git a/components/permissions/contexts/window_management_permission_context.h b/components/permissions/contexts/window_management_permission_context.h
+index ca391c1ee0..bb12d20ded 100644
+--- a/components/permissions/contexts/window_management_permission_context.h
++++ b/components/permissions/contexts/window_management_permission_context.h
+@@ -5,6 +5,8 @@
+ #ifndef COMPONENTS_PERMISSIONS_CONTEXTS_WINDOW_MANAGEMENT_PERMISSION_CONTEXT_H_
+ #define COMPONENTS_PERMISSIONS_CONTEXTS_WINDOW_MANAGEMENT_PERMISSION_CONTEXT_H_
+ 
++#include <optional>
++
+ #include "build/build_config.h"
+ #include "components/permissions/content_setting_permission_context_base.h"
+ 
+@@ -22,14 +24,20 @@ class WindowManagementPermissionContext
+   WindowManagementPermissionContext& operator=(
+       const WindowManagementPermissionContext&) = delete;
+ 
++  // Cobble: lets the embedder answer from its own saved site decisions.
++  // nullopt keeps Chromium's stored state.
++  using EmbedderStatusResolver = std::optional<ContentSetting> (*)(
++      content::BrowserContext* browser_context,
++      const GURL& requesting_origin,
++      const GURL& embedding_origin);
++  static void SetEmbedderStatusResolver(EmbedderStatusResolver resolver);
++
+  protected:
+   // ContentSettingPermissionContextBase:
+-#if BUILDFLAG(IS_ANDROID)
+   ContentSetting GetContentSettingStatusInternal(
+       content::RenderFrameHost* render_frame_host,
+       const GURL& requesting_origin,
+       const GURL& embedding_origin) const override;
+-#endif  // IS_ANDROID
+   void UserMadePermissionDecision(const PermissionRequestID& id,
+                                   const GURL& requesting_origin,
+                                   const GURL& embedding_origin,
+diff --git a/components/permissions/permission_request_manager.cc b/components/permissions/permission_request_manager.cc
+index d147085a8d..728a6d67a6 100644
+--- a/components/permissions/permission_request_manager.cc
++++ b/components/permissions/permission_request_manager.cc
+@@ -190,6 +190,17 @@ tabs::TabInterface* GetTabInterface(content::WebContents* web_contents) {
+ 
+ // PermissionRequestManager ----------------------------------------------------
+ 
++namespace {
++PermissionRequestManager::EmbedderRequestRouter g_embedder_request_router =
++    nullptr;
++}  // namespace
++
++// static
++void PermissionRequestManager::SetEmbedderRequestRouter(
++    EmbedderRequestRouter router) {
++  g_embedder_request_router = router;
++}
++
+ bool PermissionRequestManager::PermissionRequestSource::
+     IsSourceFrameInactiveAndDisallowActivation() const {
+   content::RenderFrameHost* rfh =
+@@ -220,6 +231,11 @@ void PermissionRequestManager::AddRequest(
+   DCHECK_EQ(content::WebContents::FromRenderFrameHost(source_frame),
+             web_contents());
+ 
++  if (g_embedder_request_router &&
++      g_embedder_request_router(source_frame, request)) {
++    return;
++  }
++
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kDenyPermissionPrompts)) {
+     request->PermissionDenied();
+diff --git a/components/permissions/permission_request_manager.h b/components/permissions/permission_request_manager.h
+index 1dd173ee5e..d35777fe3d 100644
+--- a/components/permissions/permission_request_manager.h
++++ b/components/permissions/permission_request_manager.h
+@@ -142,6 +142,13 @@ class PermissionRequestManager
+   void AddRequest(content::RenderFrameHost* source_frame,
+                   std::unique_ptr<PermissionRequest> request);
+ 
++  // Cobble: an embedder hook that may take `request` before prompts are
++  // denied. It returns true after taking ownership.
++  using EmbedderRequestRouter =
++      bool (*)(content::RenderFrameHost* source_frame,
++               std::unique_ptr<PermissionRequest>& request);
++  static void SetEmbedderRequestRouter(EmbedderRequestRouter router);
++
+   // Will reposition the bubble (may change parent if necessary).
+   void UpdateAnchor();
+ 

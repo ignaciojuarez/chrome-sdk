@@ -389,7 +389,7 @@ enum HarnessValidation {
         do {
             guard runtime.isReady else { throw ValidationError("Chromium was not ready.") }
             let runtimeInfo = try runtime.runtimeInfo()
-            checks["runtimeVersionAvailable"] = runtimeInfo.abiVersion == 18 &&
+            checks["runtimeVersionAvailable"] = runtimeInfo.abiVersion == 19 &&
                 runtimeInfo.chromiumVersion == Bundle.main.object(
                     forInfoDictionaryKey: "CFBundleShortVersionString") as? String &&
                 !runtimeInfo.chromiumRevision.isEmpty
@@ -936,6 +936,148 @@ enum HarnessValidation {
                 reentrantCancellations == 1 && reentrantRequest?.isPending == false
             }
             checks["reentrantMediaCloseCancelledOnce"] = reentrantRequest?.allow() == false
+
+            // ABI 19 display capture. Fake devices skip the macOS picker and
+            // deliver Chromium's fake window/screen source for the chosen surface.
+            var displayRequest: ChromiumMediaPermissionRequest?
+            runtime.onMediaPermissionRequest = { displayRequest = $0 }
+            let displayMedia = configuration.phased(configuration.mediaPage, "display-window")
+            try validationPage.load(displayMedia)
+            try await waitForCondition("pending display request") {
+                displayRequest?.isPending == true
+            }
+            guard let displayRequest else {
+                throw ValidationError("Native display capture request was not delivered.")
+            }
+            checks["displayRequestMetadata"] = displayRequest.page === validationPage &&
+                displayRequest.kinds == .display &&
+                displayRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
+                displayRequest.embeddingOrigin.absoluteString == configuration.secureOriginString
+            checks["displayRequiresSurface"] = !displayRequest.allow() && displayRequest.isPending
+            guard displayRequest.allow(display: .window) else {
+                throw ValidationError("Native display capture request was not accepted.")
+            }
+            try await wait(for: validationPage, url: displayMedia,
+                           title: "\(configuration.displayGrantedTitle) window 0")
+            checks["displayWindowGranted"] = !displayRequest.isPending && !displayRequest.deny()
+            try await waitForCondition("native display capture state") {
+                validationPage.isCapturingDisplay && !validationPage.isCapturingCamera
+            }
+            checks["displayCaptureStateReported"] =
+                validationPage.isCapturingDisplay && !validationPage.isCapturingCamera
+            guard validationPage.stopDisplayCapture() else {
+                throw ValidationError("Native display capture stop was rejected.")
+            }
+            try await wait(for: validationPage, url: displayMedia,
+                           title: configuration.displayEndedTitle)
+            try await waitForCondition("native display capture stop") {
+                !validationPage.isCapturingDisplay
+            }
+            checks["displayCaptureStopped"] = !validationPage.stopDisplayCapture()
+            // Stop-all ends display streams too.
+            runtime.onMediaPermissionRequest = { $0.allow(display: .screen) }
+            let screenMedia = configuration.phased(configuration.mediaPage, "display-screen")
+            try validationPage.load(screenMedia)
+            try await wait(for: validationPage, url: screenMedia,
+                           title: "\(configuration.displayGrantedTitle) monitor 0")
+            try await waitForCondition("native screen capture state") {
+                validationPage.isCapturingDisplay
+            }
+            guard validationPage.stopMediaCapture() else {
+                throw ValidationError("Native stop-all did not cover display capture.")
+            }
+            try await wait(for: validationPage, url: screenMedia,
+                           title: configuration.displayEndedTitle)
+            try await waitForCondition("native stop-all display stop") {
+                !validationPage.isCapturingDisplay
+            }
+            checks["stopAllEndsDisplayCapture"] = !validationPage.stopMediaCapture()
+            runtime.onMediaPermissionRequest = { $0.deny() }
+            let deniedDisplay = configuration.phased(configuration.mediaPage, "display-denied")
+            try validationPage.load(deniedDisplay)
+            try await wait(for: validationPage, url: deniedDisplay,
+                           title: "\(configuration.displayDeniedTitle) NotAllowedError")
+            checks["displayDenied"] = !validationPage.isCapturingDisplay
+
+            // ABI 19 window management rides the media request path. Chromium
+            // keeps the grant for this session only; the host revokes it.
+            // Stock Chromium asks only with transient activation; smoke.mjs
+            // clicks through DevTools when asked (trusted-click.json).
+            let clickDirectory = configuration.beforeUnloadMarker.deletingLastPathComponent()
+            var trustedClicks = 0
+            func trustedClick(_ url: URL) async throws {
+                trustedClicks += 1
+                try await wait(for: validationPage, url: url, title: "Cobble Screens Pending \(configuration.token)")
+                try JSONEncoder().encode(["url": url.absoluteString, "id": String(trustedClicks)])
+                    .write(to: clickDirectory.appendingPathComponent("trusted-click.json"), options: .atomic)
+                let done = clickDirectory.appendingPathComponent("trusted-click-\(trustedClicks).done")
+                try await waitForCondition("trusted click \(trustedClicks)") {
+                    FileManager.default.fileExists(atPath: done.path)
+                }
+            }
+            var screensRequests: [ChromiumMediaPermissionRequest] = []
+            runtime.onMediaPermissionRequest = { screensRequests.append($0) }
+            let screens = configuration.phased(configuration.mediaPage, "screens-granted")
+            try validationPage.load(screens)
+            try await trustedClick(screens)
+            do {
+                try await waitForCondition("pending window management request") {
+                    screensRequests.first?.isPending == true
+                }
+            } catch {
+                throw ValidationError("Window management request was not delivered; page title: \(validationPage.title)")
+            }
+            let screensRequest = screensRequests[0]
+            checks["windowManagementRequestMetadata"] = screensRequest.page === validationPage &&
+                screensRequest.kinds == .windowManagement &&
+                screensRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
+                screensRequest.embeddingOrigin.absoluteString == configuration.secureOriginString
+            checks["windowManagementRejectsSurface"] =
+                !screensRequest.allow(display: .window) && screensRequest.isPending
+            guard screensRequest.allow() else {
+                throw ValidationError("Native window management request was not accepted.")
+            }
+            // Like Chrome's "Allow this time", the query still reports prompt.
+            try await wait(for: validationPage, url: screens,
+                           title: "\(configuration.screensGrantedTitle) true prompt")
+            let screensAgain = configuration.phased(configuration.mediaPage, "screens-again")
+            let origin = configuration.secureOriginString
+            // Saved host decisions answer quiet checks and permissions.query.
+            var resolved: [(ChromiumMediaPermissionKinds, String, String)] = []
+            var saved = ChromiumPermissionSetting.allow
+            validationPage.context.permissionResolver = { resolved.append(($0, $1, $2)); return saved }
+            try validationPage.load(screensAgain)
+            try await wait(for: validationPage, url: screensAgain,
+                           title: "\(configuration.screensGrantedTitle) true granted")
+            saved = .deny
+            try validationPage.load(screensAgain)
+            try await wait(for: validationPage, url: screensAgain,
+                           title: "\(configuration.screensDeniedTitle) NotAllowedError denied")
+            checks["windowManagementSavedDecisionsAnswerQuietly"] = screensRequests.count == 1 &&
+                !resolved.isEmpty && resolved.allSatisfy {
+                    $0.0 == .windowManagement && $0.1 == origin && $0.2 == origin
+                }
+            validationPage.context.permissionResolver = nil
+            checks["windowManagementResetValidatesKind"] =
+                !validationPage.context.resetPermission(.display, origin: origin) &&
+                !validationPage.context.resetPermission(.windowManagement, origin: origin + "/path")
+            guard validationPage.context.resetPermission(.windowManagement, origin: origin) else {
+                throw ValidationError("Native window management reset was rejected.")
+            }
+            runtime.onMediaPermissionRequest = { screensRequests.append($0); $0.deny() }
+            let screensDenied = configuration.phased(configuration.mediaPage, "screens-denied")
+            try validationPage.load(screensDenied)
+            try await trustedClick(screensDenied)
+            try await wait(for: validationPage, url: screensDenied,
+                           title: "\(configuration.screensDeniedTitle) NotAllowedError prompt")
+            checks["windowManagementResetAsksAgain"] = screensRequests.count == 2
+            // A denial stores no block in Chromium, so the host is asked again.
+            let screensDeniedAgain = configuration.phased(configuration.mediaPage, "screens-denied-again")
+            try validationPage.load(screensDeniedAgain)
+            try await trustedClick(screensDeniedAgain)
+            try await wait(for: validationPage, url: screensDeniedAgain,
+                           title: "\(configuration.screensDeniedTitle) NotAllowedError prompt")
+            checks["windowManagementDeniedStoresNothing"] = screensRequests.count == 3
             runtime.onMediaPermissionRequest = nil
 
             runtime.onJavaScriptDialog = nil
@@ -2441,6 +2583,11 @@ private extension HarnessValidation {
         var mixedTitle: String { "Cobble TLS Mixed \(token)" }
         var mediaGrantedTitle: String { "Cobble Media Granted \(token)" }
         var mediaDeniedTitle: String { "Cobble Media Denied \(token)" }
+        var displayGrantedTitle: String { "Cobble Display Granted \(token)" }
+        var displayDeniedTitle: String { "Cobble Display Denied \(token)" }
+        var displayEndedTitle: String { "Cobble Display Ended \(token)" }
+        var screensGrantedTitle: String { "Cobble Screens Granted \(token)" }
+        var screensDeniedTitle: String { "Cobble Screens Denied \(token)" }
         var javascriptDeniedTitle: String { "Cobble JS Result false \(token)" }
         var javascriptAcceptedTitle: String { "Cobble JS Result \(token) \(token)" }
         var authGrantedTitle: String { "Cobble Auth Granted \(token)" }

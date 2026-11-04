@@ -34,12 +34,20 @@ import CCobbleChromium
         self.userGesture = userGesture
     }
 
-    @discardableResult public func allow() -> Bool { resolve(allow: true) }
-    @discardableResult public func deny() -> Bool { resolve(allow: false) }
+    /// Allows a camera/microphone request. Display requests must choose a surface.
+    @discardableResult public func allow() -> Bool {
+        resolve(UInt8(CCS_MEDIA_PERMISSION_ALLOW.rawValue))
+    }
+    /// Opens the macOS picker for `surface`. Cancelling the picker denies the page.
+    @discardableResult public func allow(display surface: ChromiumDisplaySurface) -> Bool {
+        resolve(UInt8((surface == .screen ? CCS_MEDIA_PERMISSION_ALLOW_SCREEN
+                                          : CCS_MEDIA_PERMISSION_ALLOW_WINDOW).rawValue))
+    }
+    @discardableResult public func deny() -> Bool { resolve(UInt8(CCS_MEDIA_PERMISSION_DENY.rawValue)) }
 
-    private func resolve(allow: Bool) -> Bool {
+    private func resolve(_ decision: UInt8) -> Bool {
         guard isPending,
-              runtime.api.media_permission_resolve?(handle, allow ? 1 : 0) == 1 else { return false }
+              runtime.api.media_permission_resolve?(handle, decision) == 1 else { return false }
         isPending = false
         runtime.mediaRequests.removeValue(forKey: handle)
         onCancel = nil
