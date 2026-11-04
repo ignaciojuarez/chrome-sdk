@@ -2136,7 +2136,9 @@ async function main() {
       }
       return true;
     })().then((passed) => ({ passed }), (error) => ({ passed: false, error }));
-    const nativeValidation = await poll("native extension and website-data validation", options.timeoutMs,
+    // One pass runs every native stage, including both macOS full-screen
+    // transitions, so it outlasts a single step's timeout.
+    const nativeValidation = await poll("native extension and website-data validation", options.timeoutMs * 3,
       async () => {
         try { return JSON.parse(await readFile(validationReportPath, "utf8")); }
         catch { return false; }

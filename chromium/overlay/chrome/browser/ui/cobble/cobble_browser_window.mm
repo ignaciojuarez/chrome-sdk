@@ -224,7 +224,16 @@
 - (void)windowDidEnterFullScreen:(NSNotification*)notification {
   _entering = NO;
   if (_exiting) {
-    [_window toggleFullScreen:nil];
+    // AppKit ignores a toggle from inside this callback, which left the page's
+    // window full screen after the page had already exited. Like Chromium's
+    // own fullscreen controller, leave on the next turn of the run loop.
+    NSWindow* window = _window;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (window.delegate == self &&
+          (window.styleMask & NSWindowStyleMaskFullScreen)) {
+        [window toggleFullScreen:nil];
+      }
+    });
     return;
   }
   [self showDisclosure];
