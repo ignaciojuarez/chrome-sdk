@@ -1,0 +1,30 @@
+diff --git a/chrome/browser/resource_coordinator/tab_lifecycle_unit.cc b/chrome/browser/resource_coordinator/tab_lifecycle_unit.cc
+index 6f872ee5a8..2bdf224408 100644
+--- a/chrome/browser/resource_coordinator/tab_lifecycle_unit.cc
++++ b/chrome/browser/resource_coordinator/tab_lifecycle_unit.cc
+@@ -46,6 +46,10 @@
+ #include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
+ #include "url/gurl.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ namespace resource_coordinator {
+ 
+ namespace {
+@@ -362,6 +366,14 @@ bool TabLifecycleUnitSource::TabLifecycleUnit::Discard(
+   if (IsDiscardBlockedByFeature(reason)) {
+     return false;
+   }
++#if BUILDFLAG(IS_MAC)
++  // Cobble owns tab lifetime. A discard replaces the WebContents its page
++  // handle wraps, which would close the user's tab (memory pressure or an
++  // extension's chrome.tabs.discard).
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+ 
+   const base::TimeTicks discard_start_time = NowTicks();
+ 

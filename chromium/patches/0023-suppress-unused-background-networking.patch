@@ -1,7 +1,69 @@
+diff --git a/chrome/browser/autocomplete/aim_eligibility_service_factory.cc b/chrome/browser/autocomplete/aim_eligibility_service_factory.cc
+index db99292ecd..53c3a67745 100644
+--- a/chrome/browser/autocomplete/aim_eligibility_service_factory.cc
++++ b/chrome/browser/autocomplete/aim_eligibility_service_factory.cc
+@@ -10,11 +10,15 @@
+ #include "base/check_is_test.h"
+ #include "base/no_destructor.h"
+ #include "base/strings/strcat.h"
++#include "build/build_config.h"
+ #include "chrome/browser/autocomplete/chrome_aim_eligibility_service.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_selections.h"
+ #include "chrome/browser/search_engines/template_url_service_factory.h"
+ #include "chrome/browser/signin/identity_manager_factory.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "components/contextual_tasks/public/features.h"
+ #include "components/embedder_support/user_agent_utils.h"
+ #include "content/public/browser/browser_context.h"
+@@ -34,6 +38,11 @@ AimEligibilityService::Configuration CreateConfiguration(
+   config.is_off_the_record = is_off_the_record;
+   config.full_version_list =
+       embedder_support::GetUserAgentMetadata().SerializeBrandFullVersionList();
++#if BUILDFLAG(IS_MAC)
++  // Cobble has no Chrome AIM surface. Keep the expected keyed-service object
++  // available to callers without starting account or eligibility requests.
++  config.disabled = cobble_chromium::IsEnabled();
++#endif
+   if (!contextual_tasks::IsContextualTasksUIEnabled()) {
+     return config;
+   }
+diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
+index 187e99b29b..b467d82285 100644
+--- a/chrome/browser/browser_process_impl.cc
++++ b/chrome/browser/browser_process_impl.cc
+@@ -81,6 +81,10 @@
+ #include "chrome/browser/printing/background_printing_manager.h"
+ #include "chrome/browser/printing/print_job_manager.h"
+ #include "chrome/browser/profiles/profile_manager.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ #include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
+ #include "chrome/browser/serial/serial_policy_allowed_ports.h"
+ #include "chrome/browser/shell_integration.h"
+@@ -1193,6 +1197,13 @@ BrowserProcessImpl::device_parental_controls() {
+ }
+ 
+ IntranetRedirectDetector* BrowserProcessImpl::intranet_redirect_detector() {
++#if BUILDFLAG(IS_MAC)
++  // Cobble has no omnibox interception infobar. Avoid its random-host HTTP
++  // probes at startup and after network changes, including lazy callers.
++  if (cobble_chromium::IsEnabled()) {
++    return nullptr;
++  }
++#endif
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   if (!intranet_redirect_detector_) {
+     intranet_redirect_detector_ = std::make_unique<IntranetRedirectDetector>();
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
+index 268afea521..52a2df1562 100644
 --- a/chrome/browser/chrome_browser_main.cc
 +++ b/chrome/browser/chrome_browser_main.cc
-@@ -78,7 +78,9 @@
+@@ -76,7 +76,9 @@
  #include "chrome/browser/ui/color/chrome_color_mixers.h"
  #include "chrome/browser/ui/javascript_dialogs/chrome_javascript_app_modal_dialog_view_factory.h"
  #include "chrome/browser/ui/profiles/profile_error_dialog.h"
@@ -11,7 +73,7 @@ diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_brows
  
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/cobble/cobble_chromium.h"
-@@ -818,6 +820,20 @@
+@@ -834,6 +836,20 @@ std::unique_ptr<content::BrowserMainParts> ChromeBrowserMainParts::Create(
          switches::kNoStartupWindow);
      base::CommandLine::ForCurrentProcess()->AppendSwitch(
          switches::kDisableDefaultApps);
@@ -32,207 +94,8 @@ diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_brows
      // Unsupported permission kinds stay denied before Chromium can attempt
      // to present native Chrome UI. Camera/microphone requests are routed by
      // BrowserWebContentsDelegate directly to the Cobble client.
-diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
---- a/chrome/browser/browser_process_impl.cc
-+++ b/chrome/browser/browser_process_impl.cc
-@@ -81,6 +81,10 @@
- #include "chrome/browser/printing/background_printing_manager.h"
- #include "chrome/browser/printing/print_job_manager.h"
- #include "chrome/browser/profiles/profile_manager.h"
-+#if BUILDFLAG(IS_MAC)
-+#include "chrome/browser/ui/cobble/cobble_chromium.h"
-+#endif
-+
- #include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
- #include "chrome/browser/serial/serial_policy_allowed_ports.h"
- #include "chrome/browser/shell_integration.h"
-@@ -1146,6 +1150,13 @@
- 
- #if !BUILDFLAG(IS_ANDROID)
- IntranetRedirectDetector* BrowserProcessImpl::intranet_redirect_detector() {
-+#if BUILDFLAG(IS_MAC)
-+  // Cobble has no omnibox interception infobar. Avoid its random-host HTTP
-+  // probes at startup and after network changes, including lazy callers.
-+  if (cobble_chromium::IsEnabled()) {
-+    return nullptr;
-+  }
-+#endif
-   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-   if (!intranet_redirect_detector_) {
-     intranet_redirect_detector_ = std::make_unique<IntranetRedirectDetector>();
-diff --git a/chrome/browser/autocomplete/aim_eligibility_service_factory.cc b/chrome/browser/autocomplete/aim_eligibility_service_factory.cc
---- a/chrome/browser/autocomplete/aim_eligibility_service_factory.cc
-+++ b/chrome/browser/autocomplete/aim_eligibility_service_factory.cc
-@@ -10,11 +10,15 @@
- #include "base/check_is_test.h"
- #include "base/no_destructor.h"
- #include "base/strings/strcat.h"
-+#include "build/build_config.h"
- #include "chrome/browser/autocomplete/chrome_aim_eligibility_service.h"
- #include "chrome/browser/profiles/profile.h"
- #include "chrome/browser/profiles/profile_selections.h"
- #include "chrome/browser/search_engines/template_url_service_factory.h"
- #include "chrome/browser/signin/identity_manager_factory.h"
-+#if BUILDFLAG(IS_MAC)
-+#include "chrome/browser/ui/cobble/cobble_chromium.h"
-+#endif
- #include "components/contextual_tasks/public/features.h"
- #include "components/embedder_support/user_agent_utils.h"
- #include "content/public/browser/browser_context.h"
-@@ -27,6 +31,11 @@
-     bool is_off_the_record) {
-   AimEligibilityService::Configuration config;
-   config.is_off_the_record = is_off_the_record;
-+#if BUILDFLAG(IS_MAC)
-+  // Cobble has no Chrome AIM surface. Keep the expected keyed-service object
-+  // available to callers without starting account or eligibility requests.
-+  config.disabled = cobble_chromium::IsEnabled();
-+#endif
-   if (!contextual_tasks::IsContextualTasksUIEnabled()) {
-     return config;
-   }
-diff --git a/components/omnibox/browser/aim_eligibility_service.cc b/components/omnibox/browser/aim_eligibility_service.cc
---- a/components/omnibox/browser/aim_eligibility_service.cc
-+++ b/components/omnibox/browser/aim_eligibility_service.cc
-@@ -323,7 +323,8 @@
-       url_loader_factory_(url_loader_factory),
-       identity_manager_(identity_manager),
-       configuration_(std::move(configuration)) {
--  if (!base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
-+  if (configuration_.disabled ||
-+      !base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
-     return;
-   }
- 
-@@ -439,7 +440,8 @@
- 
- bool AimEligibilityService::IsAimAllowedByFeatureAndPolicy() const {
-   // Kill switch: If AIM is completely disabled, return false.
--  if (!base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
-+  if (configuration_.disabled ||
-+      !base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
-     return false;
-   }
- 
-@@ -719,6 +721,9 @@
- }
- 
- void AimEligibilityService::StartServerEligibilityRequestForDebugging() {
-+  if (configuration_.disabled) {
-+    return;
-+  }
-   pref_service_->SetBoolean(kManualOverridePrefName, false);
-   pref_service_->SetTime(kManualOverrideTimestampPrefName, base::Time());
-   StartServerEligibilityRequest(RequestSource::kUser, GetLocale());
-@@ -1073,6 +1078,9 @@
- void AimEligibilityService::ScheduleServerEligibilityRequest(
-     RequestSource request_source,
-     const std::string& locale) {
-+  if (configuration_.disabled) {
-+    return;
-+  }
-   bool is_debounced = false;
-   if (base::FeatureList::IsEnabled(omnibox::kAimEligibilityServiceDebounce)) {
-     if (request_debounce_timer_.IsRunning()) {
-@@ -1091,6 +1099,9 @@
- void AimEligibilityService::StartServerEligibilityRequest(
-     RequestSource request_source,
-     const std::string& locale) {
-+  if (configuration_.disabled) {
-+    return;
-+  }
-   if (IsManualOverrideActive() && request_source != RequestSource::kUser) {
-     return;
-   }
-diff --git a/components/omnibox/browser/aim_eligibility_service.h b/components/omnibox/browser/aim_eligibility_service.h
---- a/components/omnibox/browser/aim_eligibility_service.h
-+++ b/components/omnibox/browser/aim_eligibility_service.h
-@@ -105,6 +105,10 @@
- 
-   // Configuration object for the service.
-   struct Configuration {
-+    // Embedders without an AIM surface can retain the service object while
-+    // disabling its eligibility state, observers, and network requests.
-+    bool disabled = false;
-+
-     // Whether the profile is off-the-record.
-     bool is_off_the_record = false;
- 
-diff --git a/chrome/browser/signin/account_investigator_factory.cc b/chrome/browser/signin/account_investigator_factory.cc
---- a/chrome/browser/signin/account_investigator_factory.cc
-+++ b/chrome/browser/signin/account_investigator_factory.cc
-@@ -4,9 +4,13 @@
- 
- #include "chrome/browser/signin/account_investigator_factory.h"
- 
- #include "base/no_destructor.h"
-+#include "build/build_config.h"
- #include "chrome/browser/profiles/profile.h"
- #include "chrome/browser/signin/identity_manager_factory.h"
-+#if BUILDFLAG(IS_MAC)
-+#include "chrome/browser/ui/cobble/cobble_chromium.h"
-+#endif
- #include "components/pref_registry/pref_registry_syncable.h"
- #include "components/prefs/pref_service_factory.h"
- #include "components/signin/core/browser/account_investigator.h"
-@@ -39,6 +43,13 @@
- std::unique_ptr<KeyedService>
- AccountInvestigatorFactory::BuildServiceInstanceForBrowserContext(
-     content::BrowserContext* context) const {
-+#if BUILDFLAG(IS_MAC)
-+  // This service only reports Chrome account-cookie metrics. Cobble has no
-+  // corresponding product surface or telemetry.
-+  if (cobble_chromium::IsEnabled()) {
-+    return nullptr;
-+  }
-+#endif
-   Profile* profile(Profile::FromBrowserContext(context));
-   std::unique_ptr<AccountInvestigator> investigator =
-       std::make_unique<AccountInvestigator>(
-@@ -53,6 +64,11 @@
- }
- 
- bool AccountInvestigatorFactory::ServiceIsCreatedWithBrowserContext() const {
-+#if BUILDFLAG(IS_MAC)
-+  if (cobble_chromium::IsEnabled()) {
-+    return false;
-+  }
-+#endif
-   return true;
- }
- 
-diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
-index afd1085d96..68b23c4638 100644
---- a/chrome/browser/profiles/profile_manager.cc
-+++ b/chrome/browser/profiles/profile_manager.cc
-@@ -67,6 +67,9 @@
- #include "chrome/browser/signin/account_reconcilor_factory.h"
- #include "chrome/browser/signin/identity_manager_factory.h"
- #include "chrome/browser/signin/signin_util.h"
-+#if BUILDFLAG(IS_MAC)
-+#include "chrome/browser/ui/cobble/cobble_chromium.h"
-+#endif
- #include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
- #include "chrome/browser/ui/ui_features.h"
- #include "chrome/browser/unified_consent/unified_consent_service_factory.h"
-@@ -1622,7 +1625,15 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
-   PreloadingModelKeyedServiceFactory::GetForProfile(profile);
- 
-   IdentityManagerFactory::GetForProfile(profile)->OnNetworkInitialized();
-+#if BUILDFLAG(IS_MAC)
-+  // Cobble has no Chrome account-cookie reconciliation surface. Explicit
-+  // sign-in consumers still instantiate the reconcilor through its factory.
-+  if (!cobble_chromium::IsEnabled()) {
-+    AccountReconcilorFactory::GetForProfile(profile);
-+  }
-+#else
-   AccountReconcilorFactory::GetForProfile(profile);
-+#endif
- #if BUILDFLAG(IS_ANDROID)
-   // Should be after IdentityManager::OnNetworkInitialized.
-   SigninManagerAndroidFactory::GetForProfile(profile);
 diff --git a/chrome/browser/metrics/desktop_session_duration/desktop_profile_session_durations_service_factory.cc b/chrome/browser/metrics/desktop_session_duration/desktop_profile_session_durations_service_factory.cc
-index 0dcaab3..36073ad 100644
+index a109f4abe6..f394818bd6 100644
 --- a/chrome/browser/metrics/desktop_session_duration/desktop_profile_session_durations_service_factory.cc
 +++ b/chrome/browser/metrics/desktop_session_duration/desktop_profile_session_durations_service_factory.cc
 @@ -6,6 +6,10 @@
@@ -260,3 +123,145 @@ index 0dcaab3..36073ad 100644
    Profile* profile = Profile::FromBrowserContext(context);
  
  // On ChromeOS, IsGuestSession and IsRegularProfile() are not mutually
+diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
+index 9701dc8247..18cd4be30b 100644
+--- a/chrome/browser/profiles/profile_manager.cc
++++ b/chrome/browser/profiles/profile_manager.cc
+@@ -67,6 +67,9 @@
+ #include "chrome/browser/signin/account_reconcilor_factory.h"
+ #include "chrome/browser/signin/identity_manager_factory.h"
+ #include "chrome/browser/signin/signin_util.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "chrome/browser/unified_consent/unified_consent_service_factory.h"
+@@ -1603,7 +1606,15 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
+   NavigationPredictorKeyedServiceFactory::GetForProfile(profile);
+ 
+   IdentityManagerFactory::GetForProfile(profile)->OnNetworkInitialized();
++#if BUILDFLAG(IS_MAC)
++  // Cobble has no Chrome account-cookie reconciliation surface. Explicit
++  // sign-in consumers still instantiate the reconcilor through its factory.
++  if (!cobble_chromium::IsEnabled()) {
++    AccountReconcilorFactory::GetForProfile(profile);
++  }
++#else
+   AccountReconcilorFactory::GetForProfile(profile);
++#endif
+ #if BUILDFLAG(IS_ANDROID)
+   // Should be after IdentityManager::OnNetworkInitialized.
+   SigninManagerAndroidFactory::GetForProfile(profile);
+diff --git a/chrome/browser/signin/account_investigator_factory.cc b/chrome/browser/signin/account_investigator_factory.cc
+index bf8db216ef..71af5b47c3 100644
+--- a/chrome/browser/signin/account_investigator_factory.cc
++++ b/chrome/browser/signin/account_investigator_factory.cc
+@@ -5,8 +5,12 @@
+ #include "chrome/browser/signin/account_investigator_factory.h"
+ 
+ #include "base/no_destructor.h"
++#include "build/build_config.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/signin/identity_manager_factory.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
+ #include "components/pref_registry/pref_registry_syncable.h"
+ #include "components/prefs/pref_service_factory.h"
+ #include "components/signin/core/browser/account_investigator.h"
+@@ -40,6 +44,13 @@ AccountInvestigatorFactory::~AccountInvestigatorFactory() = default;
+ std::unique_ptr<KeyedService>
+ AccountInvestigatorFactory::BuildServiceInstanceForBrowserContext(
+     content::BrowserContext* context) const {
++#if BUILDFLAG(IS_MAC)
++  // This service only reports Chrome account-cookie metrics. Cobble has no
++  // corresponding product surface or telemetry.
++  if (cobble_chromium::IsEnabled()) {
++    return nullptr;
++  }
++#endif
+   Profile* profile(Profile::FromBrowserContext(context));
+   std::unique_ptr<AccountInvestigator> investigator =
+       std::make_unique<AccountInvestigator>(
+@@ -54,6 +65,11 @@ void AccountInvestigatorFactory::RegisterProfilePrefs(
+ }
+ 
+ bool AccountInvestigatorFactory::ServiceIsCreatedWithBrowserContext() const {
++#if BUILDFLAG(IS_MAC)
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+   return true;
+ }
+ 
+diff --git a/components/omnibox/browser/aim_eligibility_service.cc b/components/omnibox/browser/aim_eligibility_service.cc
+index 4f1ee1e285..7001db8e1b 100644
+--- a/components/omnibox/browser/aim_eligibility_service.cc
++++ b/components/omnibox/browser/aim_eligibility_service.cc
+@@ -323,7 +323,8 @@ AimEligibilityService::AimEligibilityService(
+       url_loader_factory_(url_loader_factory),
+       identity_manager_(identity_manager),
+       configuration_(std::move(configuration)) {
+-  if (!base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
++  if (configuration_.disabled ||
++      !base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
+     return;
+   }
+ 
+@@ -439,7 +440,8 @@ bool AimEligibilityService::IsAimAllowedByDse() const {
+ 
+ bool AimEligibilityService::IsAimAllowedByFeatureAndPolicy() const {
+   // Kill switch: If AIM is completely disabled, return false.
+-  if (!base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
++  if (configuration_.disabled ||
++      !base::FeatureList::IsEnabled(omnibox::kAimEnabled)) {
+     return false;
+   }
+ 
+@@ -727,6 +729,9 @@ AimEligibilityService::GetMostRecentResponseAuthMethod() const {
+ }
+ 
+ void AimEligibilityService::StartServerEligibilityRequestForDebugging() {
++  if (configuration_.disabled) {
++    return;
++  }
+   pref_service_->SetBoolean(kManualOverridePrefName, false);
+   pref_service_->SetTime(kManualOverrideTimestampPrefName, base::Time());
+   StartServerEligibilityRequest(RequestSource::kUser, GetLocale());
+@@ -1082,6 +1087,9 @@ GURL AimEligibilityService::GetRequestUrl(
+ void AimEligibilityService::ScheduleServerEligibilityRequest(
+     RequestSource request_source,
+     const std::string& locale) {
++  if (configuration_.disabled) {
++    return;
++  }
+   bool is_debounced = false;
+   if (base::FeatureList::IsEnabled(omnibox::kAimEligibilityServiceDebounce)) {
+     if (request_debounce_timer_.IsRunning()) {
+@@ -1100,6 +1108,9 @@ void AimEligibilityService::ScheduleServerEligibilityRequest(
+ void AimEligibilityService::StartServerEligibilityRequest(
+     RequestSource request_source,
+     const std::string& locale) {
++  if (configuration_.disabled) {
++    return;
++  }
+   if (IsManualOverrideActive() && request_source != RequestSource::kUser) {
+     return;
+   }
+diff --git a/components/omnibox/browser/aim_eligibility_service.h b/components/omnibox/browser/aim_eligibility_service.h
+index 6c91ed4b04..eeb5eeb995 100644
+--- a/components/omnibox/browser/aim_eligibility_service.h
++++ b/components/omnibox/browser/aim_eligibility_service.h
+@@ -106,6 +106,10 @@ class AimEligibilityService
+ 
+   // Configuration object for the service.
+   struct Configuration {
++    // Embedders without an AIM surface can retain the service object while
++    // disabling its eligibility state, observers, and network requests.
++    bool disabled = false;
++
+     // Whether the profile is off-the-record.
+     bool is_off_the_record = false;
+ 

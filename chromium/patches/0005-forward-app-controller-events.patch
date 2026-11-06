@@ -1,15 +1,16 @@
 diff --git a/chrome/browser/app_controller_mac.mm b/chrome/browser/app_controller_mac.mm
-index 9166eed..fa01810 100644
+index ead883ef95..4474fd57f4 100644
 --- a/chrome/browser/app_controller_mac.mm
 +++ b/chrome/browser/app_controller_mac.mm
-@@ -96,5 +96,6 @@
+@@ -96,6 +96,7 @@
+ #import "chrome/browser/ui/cocoa/tab_menu_bridge.h"
  #include "chrome/browser/ui/dialogs/browser_dialogs.h"
  #include "chrome/browser/ui/extensions/application_launch.h"
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
  #include "chrome/browser/ui/profiles/profile_picker.h"
  #include "chrome/browser/ui/startup/first_run_service.h"
  #include "chrome/browser/ui/startup/google_chrome_scheme_util.h"
-@@ -930,6 +931,10 @@
+@@ -935,6 +936,10 @@ - (void)applicationWillFinishLaunching:(NSNotification*)notification {
  }
  
  - (void)tryToTerminateApplication {
@@ -20,8 +21,7 @@ index 9166eed..fa01810 100644
    if ([self confirmQuitIfNeeded] == ConfirmQuitResultAborted) {
      return;
    }
-@@ -1848,7 +1853,11 @@
- // To match standard mac behavior, we should open a new window if there are no
+@@ -1852,6 +1857,10 @@ - (void)commandDispatchUsingKeyModifiers:(id)sender {
  // browser windows.
  - (BOOL)applicationShouldHandleReopen:(NSApplication*)theApplication
                      hasVisibleWindows:(BOOL)hasVisibleWindows {
@@ -32,7 +32,7 @@ index 9166eed..fa01810 100644
    // If the browser is currently trying to quit, don't do anything and return NO
    // to prevent AppKit from doing anything.
    if (browser_shutdown::IsTryingToQuit())
-@@ -2053,6 +2062,10 @@
+@@ -2058,6 +2067,10 @@ - (Profile*)safeProfileForNewWindows:(Profile*)profile {
  }
  
  - (void)application:(NSApplication*)sender openURLs:(NSArray<NSURL*>*)urls {

@@ -1,65 +1,33 @@
-diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_service.h b/extensions/browser/api/declarative_net_request/rules_monitor_service.h
---- a/extensions/browser/api/declarative_net_request/rules_monitor_service.h
-+++ b/extensions/browser/api/declarative_net_request/rules_monitor_service.h
-@@ -131,6 +131,10 @@
-                           RulesetID ruleset_id,
-                           ApiCallbackToGetDisabledRuleIds callback);
- 
-+  // Invokes `callback` after the initial rulesets are in the request matcher.
-+  void WaitForInitialRulesets(const Extension& extension,
-+                              ApiCallback callback);
-+
-   // Returns the list of session scoped rules for `extension_id` as a
-   // base::ListValue.
-   const base::ListValue& GetSessionRulesValue(
-@@ -232,6 +236,9 @@
-                                   RulesetID ruleset_id,
-                                   ApiCallbackToGetDisabledRuleIds callback);
- 
-+  void WaitForInitialRulesetsInternal(const ExtensionId& extension_id,
-+                                      ApiCallback callback);
-+
-   // Internal helper for UpdateSessionRules.
-   void UpdateSessionRulesInternal(
-       const ExtensionId& extension_id,
-@@ -302,6 +309,8 @@
-   std::map<ExtensionId, ApiCallQueue>
-       update_dynamic_or_session_rules_queue_map_;
- 
-+  std::set<ExtensionId> initial_ruleset_load_failures_;
-+
-   // Session scoped rules value corresponding to extensions.
-   // TODO(crbug.com/40733652): Currently we are storing session scoped rules in
-   // two forms: one as a base::ListValue and second in the indexed format as
 diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_service.cc b/extensions/browser/api/declarative_net_request/rules_monitor_service.cc
+index 69ead3d603..311b619a30 100644
 --- a/extensions/browser/api/declarative_net_request/rules_monitor_service.cc
 +++ b/extensions/browser/api/declarative_net_request/rules_monitor_service.cc
-@@ -454,6 +454,15 @@
-       base::BindOnce(&RulesMonitorService::GetDisabledRuleIdsInternal,
-                      weak_factory_.GetWeakPtr(), extension.id(),
-                      std::move(ruleset_id)),
-+      std::move(callback));
-+}
-+
+@@ -457,6 +457,15 @@ void RulesMonitorService::GetDisabledRuleIds(
+       std::move(callback));
+ }
+ 
 +void RulesMonitorService::WaitForInitialRulesets(const Extension& extension,
 +                                                 ApiCallback callback) {
 +  DCHECK(extension_registry_->enabled_extensions().Contains(extension.id()));
 +  update_enabled_rulesets_queue_map_[extension.id()].ExecuteOrQueueApiCall(
 +      base::BindOnce(&RulesMonitorService::WaitForInitialRulesetsInternal,
 +                     weak_factory_.GetWeakPtr(), extension.id()),
-       std::move(callback));
- }
- 
-@@ -572,6 +581,8 @@
-   if (!HasAnyDNRPermission(*extension)) {
++      std::move(callback));
++}
++
+ const base::ListValue& RulesMonitorService::GetSessionRulesValue(
+     const ExtensionId& extension_id) const {
+   static const base::NoDestructor<base::ListValue> empty_rules;
+@@ -573,6 +582,8 @@ void RulesMonitorService::OnExtensionLoaded(
      return;
    }
-+
-+  initial_ruleset_load_failures_.erase(extension->id());
  
++  initial_ruleset_load_failures_.erase(extension->id());
++
    LoadRequestData load_data(extension->id(), extension->version(),
                              LoadRulesetRequestSource::kOnExtensionLoad);
-@@ -615,6 +626,7 @@
+   int expected_ruleset_checksum;
+@@ -615,6 +626,7 @@ void RulesMonitorService::OnExtensionLoaded(
      if (ruleset_failed_to_load) {
        warning_service_->AddWarnings(
            {Warning::CreateRulesetFailedToLoadWarning(load_data.extension_id)});
@@ -67,7 +35,7 @@ diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_servic
      }
    }
  
-@@ -674,6 +686,7 @@
+@@ -674,6 +686,7 @@ void RulesMonitorService::OnExtensionUnloaded(
    // should just be ignored now given the extension is being unloaded.
    update_enabled_rulesets_queue_map_.erase(extension->id());
    update_dynamic_or_session_rules_queue_map_.erase(extension->id());
@@ -75,12 +43,10 @@ diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_servic
  
    // Notify the `file_sequence_bridge_` to invalidate any loads that started
    // before the extension was unloaded.
-@@ -982,6 +995,22 @@
- 
-   std::move(callback).Run(
+@@ -984,6 +997,22 @@ void RulesMonitorService::GetDisabledRuleIdsInternal(
        std::vector<int>(disabled_rule_ids.begin(), disabled_rule_ids.end()));
-+}
-+
+ }
+ 
 +void RulesMonitorService::WaitForInitialRulesetsInternal(
 +    const ExtensionId& extension_id,
 +    ApiCallback callback) {
@@ -95,10 +61,12 @@ diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_servic
 +    return;
 +  }
 +  std::move(callback).Run(std::nullopt);
- }
- 
++}
++
  void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
-@@ -1034,6 +1063,7 @@
+     LoadRequestData load_data) {
+   if (test_observer_) {
+@@ -1034,6 +1063,7 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
    RuleCounts static_rule_count;
    bool notify_ruleset_failed_to_load = false;
    bool global_rule_limit_exceeded = false;
@@ -106,7 +74,7 @@ diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_servic
  
    RuleCounts static_rule_limit(
        global_rules_tracker_.GetAvailableAllocation(load_data.extension_id) +
-@@ -1069,6 +1099,7 @@
+@@ -1069,6 +1099,7 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
  
      if (new_ruleset_count.regex_rule_count >
          static_rule_limit.regex_rule_count) {
@@ -114,15 +82,49 @@ diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_servic
        continue;
      }
  
-@@ -1089,6 +1120,11 @@
-     warning_service_->AddWarnings(
-         {Warning::CreateEnabledRuleCountExceededWarning(
+@@ -1091,6 +1122,11 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
              load_data.extension_id)});
-+  }
-+
+   }
+ 
 +  if (notify_ruleset_failed_to_load || global_rule_limit_exceeded ||
 +      ruleset_omitted) {
 +    initial_ruleset_load_failures_.insert(load_data.extension_id);
-   }
- 
++  }
++
    bool allocation_updated = global_rules_tracker_.OnExtensionRuleCountUpdated(
+       load_data.extension_id, static_rule_count.rule_count);
+   DCHECK(allocation_updated);
+diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_service.h b/extensions/browser/api/declarative_net_request/rules_monitor_service.h
+index 47ac25ae82..baddc4944a 100644
+--- a/extensions/browser/api/declarative_net_request/rules_monitor_service.h
++++ b/extensions/browser/api/declarative_net_request/rules_monitor_service.h
+@@ -131,6 +131,10 @@ class RulesMonitorService : public BrowserContextKeyedAPI,
+                           RulesetID ruleset_id,
+                           ApiCallbackToGetDisabledRuleIds callback);
+ 
++  // Invokes `callback` after the initial rulesets are in the request matcher.
++  void WaitForInitialRulesets(const Extension& extension,
++                              ApiCallback callback);
++
+   // Returns the list of session scoped rules for `extension_id` as a
+   // base::ListValue.
+   const base::ListValue& GetSessionRulesValue(
+@@ -232,6 +236,9 @@ class RulesMonitorService : public BrowserContextKeyedAPI,
+                                   RulesetID ruleset_id,
+                                   ApiCallbackToGetDisabledRuleIds callback);
+ 
++  void WaitForInitialRulesetsInternal(const ExtensionId& extension_id,
++                                      ApiCallback callback);
++
+   // Internal helper for UpdateSessionRules.
+   void UpdateSessionRulesInternal(
+       const ExtensionId& extension_id,
+@@ -302,6 +309,8 @@ class RulesMonitorService : public BrowserContextKeyedAPI,
+   std::map<ExtensionId, ApiCallQueue>
+       update_dynamic_or_session_rules_queue_map_;
+ 
++  std::set<ExtensionId> initial_ruleset_load_failures_;
++
+   // Session scoped rules value corresponding to extensions.
+   // TODO(crbug.com/40733652): Currently we are storing session scoped rules in
+   // two forms: one as a base::ListValue and second in the indexed format as

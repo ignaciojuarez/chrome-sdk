@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
-index 27be7a3..165a66f 100644
+index 5d999436c7..67f567f9c8 100644
 --- a/chrome/browser/download/chrome_download_manager_delegate.cc
 +++ b/chrome/browser/download/chrome_download_manager_delegate.cc
-@@ -31,6 +31,10 @@
+@@ -32,6 +32,10 @@
  #include "base/task/thread_pool.h"
  #include "base/time/time.h"
  #include "build/build_config.h"
@@ -13,7 +13,7 @@ index 27be7a3..165a66f 100644
  #include "chrome/browser/browser_process.h"
  #include "chrome/browser/download/download_core_service.h"
  #include "chrome/browser/download/download_core_service_factory.h"
-@@ -647,6 +651,11 @@ ChromeDownloadManagerDelegate::~ChromeDownloadManagerDelegate() {
+@@ -718,6 +722,11 @@ ChromeDownloadManagerDelegate::~ChromeDownloadManagerDelegate() {
  }
  
  bool ChromeDownloadManagerDelegate::SupportsHistoryLoading() {
@@ -25,10 +25,10 @@ index 27be7a3..165a66f 100644
    return HistoryServiceFactory::GetForProfile(
               profile_, ServiceAccessType::EXPLICIT_ACCESS) != nullptr;
  }
-@@ -746,6 +755,12 @@ void ChromeDownloadManagerDelegate::SetNextId(uint32_t next_id) {
+@@ -830,6 +839,12 @@ void ChromeDownloadManagerDelegate::SetNextId(uint32_t next_id) {
  void ChromeDownloadManagerDelegate::GetNextId(
      content::DownloadIdCallback callback) {
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M161);
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsEnabled()) {
 +    std::move(callback).Run(download::DownloadItem::kInvalidId);
@@ -38,10 +38,10 @@ index 27be7a3..165a66f 100644
    if (profile_->IsOffTheRecord()) {
      profile_->GetOriginalProfile()->GetDownloadManager()->GetNextId(
          std::move(callback));
-@@ -1510,6 +1525,12 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
+@@ -1608,6 +1623,12 @@ void ChromeDownloadManagerDelegate::RequestConfirmation(
      DownloadTargetDeterminerDelegate::ConfirmationCallback callback) {
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-   DCHECK(!download->IsTransient());
+   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M161);
+   CHECK(!download->IsTransient(), base::NotFatalUntil::M161);
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::RequestDownloadDestination(
 +          download, suggested_path, &callback)) {
@@ -52,12 +52,12 @@ index 27be7a3..165a66f 100644
  // TODO(xingliu): We should abstract a DownloadFilePicker interface and make all
  // platform use it.
 diff --git a/chrome/browser/download/download_core_service_impl.cc b/chrome/browser/download/download_core_service_impl.cc
-index 9d63759..9b8a91a 100644
+index a3c565167c..52bcd28396 100644
 --- a/chrome/browser/download/download_core_service_impl.cc
 +++ b/chrome/browser/download/download_core_service_impl.cc
-@@ -9,6 +9,9 @@
- #include "base/feature_list.h"
+@@ -10,6 +10,9 @@
  #include "base/functional/callback.h"
+ #include "base/metrics/histogram_functions.h"
  #include "build/build_config.h"
 +#if BUILDFLAG(IS_MAC)
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
@@ -65,7 +65,7 @@ index 9d63759..9b8a91a 100644
  #include "chrome/browser/browser_process.h"
  #include "chrome/browser/download/chrome_download_manager_delegate.h"
  #include "chrome/browser/download/download_core_service.h"
-@@ -68,7 +71,11 @@ DownloadCoreServiceImpl::GetDownloadManagerDelegate() {
+@@ -69,7 +72,11 @@ DownloadCoreServiceImpl::GetDownloadManagerDelegate() {
                                                                    manager);
  #endif
  
@@ -78,7 +78,7 @@ index 9d63759..9b8a91a 100644
      history::HistoryService* history = HistoryServiceFactory::GetForProfile(
          profile_, ServiceAccessType::EXPLICIT_ACCESS);
      history->GetNextDownloadId(
-@@ -101,6 +108,11 @@ void DownloadCoreServiceImpl::InitializeHistory() {
+@@ -103,6 +110,11 @@ void DownloadCoreServiceImpl::InitializeHistory(
    if (download_history_ || profile_->IsOffTheRecord()) {
      return;
    }
@@ -89,4 +89,4 @@ index 9d63759..9b8a91a 100644
 +#endif
    if (!download_manager_created_) {
      GetDownloadManagerDelegate();
-   }
+     if (download_history_) {

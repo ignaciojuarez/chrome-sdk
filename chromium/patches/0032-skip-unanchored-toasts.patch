@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/toasts/toast_controller.cc b/chrome/browser/ui/toasts/toast_controller.cc
-index 4ea7cb8..66077ba 100644
+index 77b520e599..c1e3708f3e 100644
 --- a/chrome/browser/ui/toasts/toast_controller.cc
 +++ b/chrome/browser/ui/toasts/toast_controller.cc
 @@ -51,6 +51,7 @@
@@ -8,9 +8,9 @@ index 4ea7cb8..66077ba 100644
  #if BUILDFLAG(IS_MAC)
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
  #include "chrome/browser/ui/fullscreen_util_mac.h"
+ #include "ui/views/views_features.h"
  #endif
- 
-@@ -122,6 +123,13 @@ bool ToastController::IsShowingToast() const {
+@@ -123,6 +124,13 @@ bool ToastController::IsShowingToast() const {
  }
  
  bool ToastController::CanShowToast(ToastId toast_id) const {

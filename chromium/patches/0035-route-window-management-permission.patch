@@ -79,10 +79,10 @@ index ca391c1ee0..bb12d20ded 100644
                                    const GURL& requesting_origin,
                                    const GURL& embedding_origin,
 diff --git a/components/permissions/permission_request_manager.cc b/components/permissions/permission_request_manager.cc
-index d147085a8d..728a6d67a6 100644
+index 1fac8c9814..d76cf145aa 100644
 --- a/components/permissions/permission_request_manager.cc
 +++ b/components/permissions/permission_request_manager.cc
-@@ -190,6 +190,17 @@ tabs::TabInterface* GetTabInterface(content::WebContents* web_contents) {
+@@ -193,6 +193,17 @@ tabs::TabInterface* GetTabInterface(content::WebContents* web_contents) {
  
  // PermissionRequestManager ----------------------------------------------------
  
@@ -100,7 +100,7 @@ index d147085a8d..728a6d67a6 100644
  bool PermissionRequestManager::PermissionRequestSource::
      IsSourceFrameInactiveAndDisallowActivation() const {
    content::RenderFrameHost* rfh =
-@@ -220,6 +231,11 @@ void PermissionRequestManager::AddRequest(
+@@ -223,6 +234,11 @@ void PermissionRequestManager::AddRequest(
    DCHECK_EQ(content::WebContents::FromRenderFrameHost(source_frame),
              web_contents());
  
@@ -113,12 +113,12 @@ index d147085a8d..728a6d67a6 100644
            switches::kDenyPermissionPrompts)) {
      request->PermissionDenied();
 diff --git a/components/permissions/permission_request_manager.h b/components/permissions/permission_request_manager.h
-index 1dd173ee5e..d35777fe3d 100644
+index 0b4b3bac77..67916de810 100644
 --- a/components/permissions/permission_request_manager.h
 +++ b/components/permissions/permission_request_manager.h
-@@ -142,6 +142,13 @@ class PermissionRequestManager
-   void AddRequest(content::RenderFrameHost* source_frame,
-                   std::unique_ptr<PermissionRequest> request);
+@@ -148,6 +148,13 @@ class PermissionRequestManager
+   // other requests of other types, they will also be cancelled.
+   void CancelAllRequestsWithType(RequestType request_type);
  
 +  // Cobble: an embedder hook that may take `request` before prompts are
 +  // denied. It returns true after taking ownership.

@@ -206,7 +206,7 @@ implementation, and regression test are all required before enabling a surface.
 | B17 | Missing | Fuzzing/property coverage for ABI strings, JSON records, manifests and patch application |
 | B18 | Qualify | Developer ID signing, notarization, stapling, clean install, rollback and sustained everyday use |
 | B19 | Host | App update feed, release channels, source pin advancement and user-facing update UX |
-| B20 | Present | Pinned 153.0.8010.37 is several milestones behind Mac Stable (156/157 rolling out on 2026-11-06); source update, patch rebase and matched runtime qualification remain outstanding. Discovery can propose Early Stable builds served to 0.5% |
+| B20 | Present | Rebased from 153.0.8010.37 to 157.0.8103.39 (Mac Stable, 2026-11-06); keep pace with each Stable milestone. Discovery can propose Early Stable builds served to 0.5% |
 | B21 | Missing | Documented security-patch owner/response deadline and emergency runtime rollback exercise |
 | B22 | Missing | Automated native CI runner capacity sufficient for repeatable full SDK acceptance |
 

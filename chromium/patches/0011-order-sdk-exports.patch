@@ -1,7 +1,8 @@
 diff --git a/chrome/app/framework.order b/chrome/app/framework.order
+index 6dbc3aeff3..4791413ba8 100644
 --- a/chrome/app/framework.order
 +++ b/chrome/app/framework.order
-@@ -29,5 +29,86 @@
+@@ -29,5 +29,86 @@ _ChromeAppModeStart_v8
  # Entry point for the web app shortcut copier.
  _ChromeWebAppShortcutCopierMain
  

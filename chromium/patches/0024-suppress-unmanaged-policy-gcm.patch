@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
-index 953895a..ca6c5cc 100644
+index 953895a36b..ca6c5cc0dd 100644
 --- a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
 +++ b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
 @@ -11,6 +11,9 @@
@@ -83,7 +83,7 @@ index 953895a..ca6c5cc 100644
 +
  }  // namespace policy
 diff --git a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h
-index 24a3826..875912b 100644
+index 24a38261f4..875912b060 100644
 --- a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h
 +++ b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.h
 @@ -11,6 +11,7 @@
@@ -127,7 +127,7 @@ index 24a3826..875912b 100644
  #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
    std::unique_ptr<ExtensionInstallPolicyInvalidator>
 diff --git a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc
-index d2386d2..52f6a6c 100644
+index d2386d277e..52f6a6c255 100644
 --- a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc
 +++ b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.cc
 @@ -11,7 +11,11 @@
@@ -217,7 +217,7 @@ index d2386d2..52f6a6c 100644
 +
  }  // namespace policy
 diff --git a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h
-index 8fcf54b..30c8eec 100644
+index 8fcf54be08..30c8eeca4d 100644
 --- a/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h
 +++ b/chrome/browser/policy/cloud/user_fm_registration_token_uploader.h
 @@ -11,6 +11,7 @@

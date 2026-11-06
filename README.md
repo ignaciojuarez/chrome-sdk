@@ -5,7 +5,7 @@ A native macOS SDK built on Chromium, with a Swift API for embedding the browser
 | | |
 | --- | --- |
 | ABI | 19 (development; matched runtime required) |
-| Engine | Chromium 153.0.8010.37, pinned in [`chromium.lock.json`](chromium.lock.json) |
+| Engine | Chromium 157.0.8103.39, pinned in [`chromium.lock.json`](chromium.lock.json) |
 | Platform | Apple Silicon macOS |
 | Source | Swift 6, Objective-C++, C++, Python |
 | Status | Development build; no release signing or notarization |

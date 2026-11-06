@@ -516,7 +516,10 @@ int32_t CCSPageFindWithOptions(CCSPageRef page, const char* text_utf8,
   helper->StartFinding(text, !(options & 1u),
                        /*case_sensitive=*/options & 2u,
                        /*find_match=*/!(options & 4u));
-  return helper->find_text().empty() ? 0 : helper->current_find_request_id();
+  // Chromium numbers requests per tab from zero; the ABI reserves zero for a
+  // cleared search, so the bridge reports every ID one higher.
+  return helper->find_text().empty() ? 0
+                                     : helper->current_find_request_id() + 1;
 }
 
 double CCSPageGetZoomFactor(CCSPageRef page) {

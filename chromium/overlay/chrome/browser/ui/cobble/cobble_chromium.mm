@@ -6,6 +6,7 @@
 #include "chrome/browser/ui/cobble/cobble_identity.h"
 #include "chrome/browser/ui/cobble/cobble_local_file.h"
 #include "chrome/browser/ui/cobble/cobble_devtools.h"
+#include "chrome/browser/media/webrtc/capture_policy_utils.h"
 #include "chrome/browser/ui/cobble/cobble_prompts.h"
 
 #import <Cocoa/Cocoa.h>
@@ -93,15 +94,18 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
 #include "media/base/media_switches.h"
 #include "media/mojo/mojom/display_media_information.mojom.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 #include "ui/base/page_transition_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
+#include "url/url_constants.h"
 
 namespace {
 using MediaResult = blink::mojom::MediaStreamRequestResult;
@@ -443,6 +447,18 @@ bool MediaRequestIsLive(const CCSMediaPermissionRequest& request) {
              request.embedding_origin;
 }
 
+// Hosts load web pages and their own extension pages. Local files have their
+// own authorized path; Chrome's privileged UI (chrome://extensions would
+// bypass Cobble's extension consent) and script URLs are never host-loadable.
+bool HostMayLoad(const GURL& url) {
+  return url.is_valid() && !url.SchemeIsFile() &&
+         !url.SchemeIs(content::kChromeUIScheme) &&
+         !url.SchemeIs(content::kChromeUIUntrustedScheme) &&
+         !url.SchemeIs(content::kChromeDevToolsScheme) &&
+         !url.SchemeIs(content::kViewSourceScheme) &&
+         !url.SchemeIs(url::kJavaScriptScheme);
+}
+
 // Chromium creates its macOS picker only with this feature (patch 0034). There
 // is no other picker here, so display capture fails closed without it.
 bool NativeDisplayPickerAvailable() {
@@ -694,10 +710,15 @@ void ContinueAllowedDisplayRequest(uint64_t id,
                                  MediaResult::PERMISSION_DENIED_BY_SYSTEM))));
 }
 
-void CancelMediaRequestsForPage(CCSPage* page) {
+void CancelMediaRequestsForPage(CCSPage* page,
+                                content::RenderFrameHost* scope = nullptr) {
   std::vector<uint64_t> ids;
   for (const auto& request : State().media_requests) {
-    if (request->page.get() == page) {
+    content::RenderFrameHost* frame =
+        content::RenderFrameHost::FromID(request->frame_id);
+    // A request whose frame is already gone can never be answered.
+    if (request->page.get() == page &&
+        (!frame || cobble_chromium::FrameInScope(frame, scope))) {
       ids.push_back(request->id);
     }
   }
@@ -741,23 +762,23 @@ void AskHostForMediaRequest(CCSPage* page,
 
 // Window management (getScreenDetails, cross-screen placement) asks the host
 // through the media permission callback. Every other prompt-backed permission
-// stays denied by --deny-permission-prompts.
+// stays unavailable, answered as dismissed: --deny-permission-prompts would
+// store a permanent BLOCK that Cobble can neither show nor clear.
 bool RoutePermissionRequest(
     content::RenderFrameHost* frame,
     std::unique_ptr<permissions::PermissionRequest>& request) {
   CheckUIThread();
   BridgeState& state = State();
-  if (request->request_type() !=
-          permissions::RequestType::kWindowManagement ||
-      !state.client.media_permission_requested || state.stopping) {
-    return false;
-  }
   content::WebContents* contents =
       content::WebContents::FromRenderFrameHost(frame);
   CCSPage* page = contents ? FindPage(contents) : nullptr;
-  if (!page || !network::IsOriginPotentiallyTrustworthy(
-                   frame->GetLastCommittedOrigin())) {
-    return false;
+  if (request->request_type() !=
+          permissions::RequestType::kWindowManagement ||
+      !state.client.media_permission_requested || state.stopping || !page ||
+      !network::IsOriginPotentiallyTrustworthy(
+          frame->GetLastCommittedOrigin())) {
+    request->Cancelled();
+    return true;
   }
   const bool user_gesture = request->GetGestureType() ==
                             permissions::PermissionRequestGestureType::GESTURE;
@@ -1261,14 +1282,19 @@ void CCSPage::DidStartNavigation(content::NavigationHandle* handle) {
   if (!local_file_alive || closed || !web_contents()) {
     return;
   }
-  if (!handle->IsSameDocument()) {
+  // A subframe navigation replaces only that frame's document and children.
+  const bool main_frame = handle->IsInPrimaryMainFrame();
+  content::RenderFrameHost* scope =
+      main_frame ? nullptr
+                 : web_contents()->UnsafeFindFrameByFrameTreeNodeId(
+                       handle->GetFrameTreeNodeId());
+  if (!handle->IsSameDocument() && (main_frame || scope)) {
     base::WeakPtr<CCSPage> alive = weak_factory.GetWeakPtr();
-    CancelMediaRequestsForPage(this);
+    CancelMediaRequestsForPage(this, scope);
     if (!alive || closed || !web_contents()) {
       return;
     }
-    cobble_chromium::CancelPagePrompts(web_contents(),
-                                       handle->IsInPrimaryMainFrame());
+    cobble_chromium::CancelPagePrompts(web_contents(), main_frame, scope);
     if (!alive || closed || !web_contents()) {
       return;
     }
@@ -1347,12 +1373,13 @@ void CCSPage::DidFinishNavigation(content::NavigationHandle* handle) {
 
 void CCSPage::RenderFrameDeleted(content::RenderFrameHost* frame) {
   base::WeakPtr<CCSPage> alive = weak_factory.GetWeakPtr();
-  CancelMediaRequestsForPage(this);
+  const bool main_frame = frame->IsInPrimaryMainFrame();
+  content::RenderFrameHost* scope = main_frame ? nullptr : frame;
+  CancelMediaRequestsForPage(this, scope);
   if (!alive || closed || !web_contents()) {
     return;
   }
-  cobble_chromium::CancelPagePrompts(web_contents(),
-                                     frame->IsInPrimaryMainFrame());
+  cobble_chromium::CancelPagePrompts(web_contents(), main_frame, scope);
 }
 
 void CCSPage::DidChangeVisibleSecurityState() {
@@ -1368,7 +1395,7 @@ void CCSPage::OnFindResultAvailable(content::WebContents* contents) {
       find_helper->find_result();
   const CCSFindResultV1 result = {
       .struct_size = sizeof(CCSFindResultV1),
-      .request_id = native.request_id(),
+      .request_id = native.request_id() + 1,  // See CCSPageFindWithOptions.
       .match_count = native.number_of_matches(),
       .active_match_ordinal = native.active_match_ordinal(),
       .final_update = static_cast<uint8_t>(native.final_update()),
@@ -1837,7 +1864,7 @@ extern "C" CCSPageRef CCSPageCreate(CCSContextRef context,
     return nullptr;
   }
   GURL url(initial_url_utf8 ? initial_url_utf8 : "about:blank");
-  if (!url.is_valid() || url.SchemeIsFile()) {
+  if (!HostMayLoad(url)) {
     return nullptr;
   }
 
@@ -1862,7 +1889,7 @@ extern "C" CCSPageRef CCSPageCreate(CCSContextRef context,
                                      /*from_user_gesture=*/true);
     params.omit_from_session_restore = true;
     params.should_trigger_session_restore = false;
-    browser = CreateBrowserWindow(std::move(params))->GetBrowserForMigrationOnly();
+    browser = static_cast<Browser*>(CreateBrowserWindow(std::move(params)));
     if (!browser) {
       return nullptr;
     }
@@ -1899,7 +1926,7 @@ extern "C" void CCSPageLoadURL(CCSPageRef page, const char* url_utf8) {
     return;
   }
   GURL url(url_utf8);
-  if (url.is_valid() && !url.SchemeIsFile()) {
+  if (HostMayLoad(url)) {
     page->web_contents()->GetController().LoadURL(
         url, content::Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   }
@@ -1943,7 +1970,13 @@ extern "C" uint8_t CCSMediaPermissionResolve(
     uint8_t decision) {
   CheckUIThread();
   request = FindMediaRequest(request);
-  if (!request || request->resolved || !MediaRequestIsLive(*request)) {
+  if (!request || request->resolved) {
+    return 0;
+  }
+  if (!MediaRequestIsLive(*request)) {
+    // Never leave the page waiting on a request the host can no longer answer.
+    FinishMediaRequest(request->id, MediaResult::FAILED_DUE_TO_SHUTDOWN_OTHER,
+                       /*notify_cancelled=*/true);
     return 0;
   }
   // Display requests must name a picker surface; device requests must not.
@@ -2092,8 +2125,7 @@ extern "C" uint8_t CCSPageMoveToHost(CCSPageRef page,
                                      /*from_user_gesture=*/true);
     params.omit_from_session_restore = true;
     params.should_trigger_session_restore = false;
-    destination =
-        CreateBrowserWindow(std::move(params))->GetBrowserForMigrationOnly();
+    destination = static_cast<Browser*>(CreateBrowserWindow(std::move(params)));
     if (!destination) {
       return 0;
     }
@@ -2182,7 +2214,8 @@ extern "C" void CCSPageRelease(CCSPageRef page) {
   }
   if (!page->closed && page->web_contents()) {
     page->released = true;
-    CCSPageClose(page);
+    // Nobody is left to answer a before-unload prompt for a released page.
+    CCSPageForceClose(page);
     return;
   }
   if (page->notifying_closed) {
@@ -2260,6 +2293,26 @@ bool HandleMediaAccessRequest(content::WebContents* contents,
   if ((audio && denied(blink::PermissionType::AUDIO_CAPTURE)) ||
       (video && denied(blink::PermissionType::VIDEO_CAPTURE))) {
     std::move(callback).Run({}, MediaResult::PERMISSION_DENIED_BY_CONTROLLER,
+                            nullptr);
+    return true;
+  }
+
+  // Chromium's DisplayMediaAccessHandler checks, which this handler replaces.
+  if (display &&
+      !frame->IsFeatureEnabled(
+          network::mojom::PermissionsPolicyFeature::kDisplayCapture)) {
+    std::move(callback).Run({}, MediaResult::CAPTURE_NOT_ALLOWED_BY_POLICY,
+                            nullptr);
+    return true;
+  }
+  if (display && !frame->HasTransientUserActivation() &&
+      capture_policy::IsTransientActivationRequiredForGetDisplayMedia(
+          contents)) {
+    std::move(callback).Run({}, MediaResult::NO_TRANSIENT_ACTIVATION, nullptr);
+    return true;
+  }
+  if (display && contents->GetVisibility() != content::Visibility::VISIBLE) {
+    std::move(callback).Run({}, MediaResult::CAPTURE_FROM_BACKGROUND_PAGE_ON_MAC,
                             nullptr);
     return true;
   }

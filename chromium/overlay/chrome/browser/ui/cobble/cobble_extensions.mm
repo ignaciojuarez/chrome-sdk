@@ -484,13 +484,13 @@ extern "C" void CCSExtensionInstallUnpacked(
   }
   // UnpackedInstaller validates the directory on its file task runner.
   // Filesystem checks here would block Chromium's UI thread.
-  // M152 only sets WITHHOLD_PERMISSIONS before activation when this feature is
-  // enabled. Do not load once with broad host access and revoke it afterward.
+  // Patch 0006 sets WITHHOLD_PERMISSIONS before activation only when this
+  // feature is enabled. Do not load once with broad host access and revoke it.
   if (!base::FeatureList::IsEnabled(
-          extensions_features::kAllowWithholdingExtensionPermissionsOnInstall)) {
+          extensions_features::kExtensionInstallSiteAccessOptions)) {
     ReplyError(callback, callback_data,
                "Extension installation requires "
-               "AllowWithholdingExtensionPermissionsOnInstall.");
+               "ExtensionInstallSiteAccessOptions.");
     return;
   }
   // An explicit unpacked install is a developer-mode action for this SDK

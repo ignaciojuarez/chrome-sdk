@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-index 835dd9a..df9bafe 100644
+index cd1fc2e4db..2f746925b3 100644
 --- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
 +++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-@@ -106,6 +106,9 @@
+@@ -113,6 +113,9 @@
  #include "chrome/browser/ui/browser_window.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -12,7 +12,7 @@ index 835dd9a..df9bafe 100644
  #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
-@@ -3716,6 +3719,12 @@ ui::ImageModel RenderViewContextMenu::GetIconForCommandId(
+@@ -3839,6 +3842,12 @@ ui::ImageModel RenderViewContextMenu::GetIconForCommandId(
  }
  
  bool RenderViewContextMenu::IsCommandIdVisible(int id) const {
@@ -26,7 +26,7 @@ index 835dd9a..df9bafe 100644
      return extension_items_.IsCommandIdVisible(id);
    }
 diff --git a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
-index 10829d1..449af1e 100644
+index 10829d1e59..449af1e6a5 100644
 --- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
 +++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
 @@ -14,14 +14,19 @@

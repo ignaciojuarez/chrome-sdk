@@ -38,6 +38,8 @@
 struct CCSJavaScriptDialogRequest {
   uint64_t id = 0;
   CCSPageRef page = nullptr;
+  // Matched by contents: a retired page no longer resolves to its contents.
+  raw_ptr<content::WebContents> contents = nullptr;
   content::GlobalRenderFrameHostToken frame_token;
   content::GlobalRenderFrameHostId frame_id;
   content::JavaScriptDialogManager::DialogClosedCallback callback;
@@ -340,6 +342,7 @@ void DialogManager::RunJavaScriptDialog(
   auto request = std::make_unique<CCSJavaScriptDialogRequest>();
   request->id = cobble_chromium::NextPromptRequestID();
   request->page = page;
+  request->contents = contents;
   request->frame_token = frame->GetGlobalFrameToken();
   request->frame_id = frame->GetGlobalId();
   request->callback = std::move(callback);
@@ -366,6 +369,7 @@ void DialogManager::RunBeforeUnloadDialog(
   auto request = std::make_unique<CCSJavaScriptDialogRequest>();
   request->id = cobble_chromium::NextPromptRequestID();
   request->page = page;
+  request->contents = contents;
   request->frame_token = frame->GetGlobalFrameToken();
   request->frame_id = frame->GetGlobalId();
   request->callback = std::move(callback);
@@ -395,6 +399,7 @@ uint64_t PublishFormRepostConfirmation(
   request->id = cobble_chromium::NextPromptRequestID();
   const uint64_t id = request->id;
   request->page = page;
+  request->contents = contents;
   request->frame_token = frame->GetGlobalFrameToken();
   request->frame_id = frame->GetGlobalId();
   request->callback = base::BindOnce(
@@ -420,7 +425,7 @@ bool DialogManager::HandleJavaScriptDialog(
     const std::u16string* prompt) {
   auto found = std::find_if(State().javascript.begin(), State().javascript.end(),
                             [contents](const auto& request) {
-                              return cobble_chromium::PageWebContents(request->page) == contents;
+                              return request->contents == contents;
                             });
   if (found == State().javascript.end()) return false;
   FinishJavaScript((*found)->id, accept, prompt ? *prompt : std::u16string(),
@@ -431,7 +436,7 @@ bool DialogManager::HandleJavaScriptDialog(
 void DialogManager::CancelDialogs(content::WebContents* contents, bool) {
   std::vector<uint64_t> ids;
   for (const auto& request : State().javascript) {
-    if (cobble_chromium::PageWebContents(request->page) == contents)
+    if (request->contents == contents)
       ids.push_back(request->id);
   }
   for (uint64_t id : ids) FinishJavaScript(id, false, {}, true);
@@ -817,7 +822,7 @@ void HandleExternalProtocol(
 bool PageHasPendingPrompt(content::WebContents* contents) {
   if (PageHasPendingExtensionInstallPrompt(contents)) return true;
   for (const auto& request : State().javascript)
-    if (PageWebContents(request->page) == contents) return true;
+    if (request->contents == contents) return true;
   for (const auto* request : State().auth)
     if (request->contents == contents && !request->callback.is_null()) return true;
   for (const auto& request : State().files)
@@ -828,30 +833,50 @@ bool PageHasPendingPrompt(content::WebContents* contents) {
 
 }
 
+bool FrameInScope(content::RenderFrameHost* frame,
+                  content::RenderFrameHost* scope) {
+  if (!scope) return true;
+  for (; frame; frame = frame->GetParentOrOuterDocument())
+    if (frame == scope) return true;
+  return false;
+}
+
 void CancelPagePrompts(content::WebContents* contents,
-                       bool cancel_extension_install) {
+                       bool cancel_extension_install,
+                       content::RenderFrameHost* scope) {
   base::WeakPtr<content::WebContents> alive = contents->GetWeakPtr();
   if (cancel_extension_install)
     CancelExtensionInstallPromptsForPage(contents);
   if (!alive) return;
+  // A request whose frame is already gone can never be answered: cancel it.
+  const auto in_scope = [scope](const content::GlobalRenderFrameHostId& id) {
+    content::RenderFrameHost* frame = content::RenderFrameHost::FromID(id);
+    return !frame || FrameInScope(frame, scope);
+  };
   std::vector<uint64_t> javascript;
   for (const auto& request : State().javascript)
-    if (PageWebContents(request->page) == contents) javascript.push_back(request->id);
+    if (request->contents == contents && in_scope(request->frame_id))
+      javascript.push_back(request->id);
   for (uint64_t id : javascript) FinishJavaScript(id, false, {}, true);
   std::vector<CCSHTTPAuthRequest*> auth;
   for (auto* request : State().auth)
-    if (request->contents == contents) auth.push_back(request);
+    if (request->contents == contents &&
+        FrameInScope(content::RenderFrameHost::FromFrameToken(
+                         request->document_token), scope))
+      auth.push_back(request);
   for (auto* request : auth) CancelAuth(request, true);
   std::vector<uint64_t> files;
   for (const auto& request : State().files)
-    if (request->contents == contents) files.push_back(request->id);
+    if (request->contents == contents && in_scope(request->frame_id))
+      files.push_back(request->id);
   for (uint64_t id : files) CancelFile(id, true);
   std::vector<uint64_t> external_protocols;
   for (const auto& request : State().external_protocols)
-    if (request->contents == contents)
+    if (request->contents == contents && in_scope(request->frame_id))
       external_protocols.push_back(request->id);
   for (uint64_t id : external_protocols) CancelExternal(id, true);
-  CancelClientCertificatesForPage(contents);
+  // Certificate requests belong to their own network request's lifetime.
+  if (!scope) CancelClientCertificatesForPage(contents);
 }
 
 }  // namespace cobble_chromium

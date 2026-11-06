@@ -1,8 +1,9 @@
 diff --git a/chrome/app/framework.exports b/chrome/app/framework.exports
-index 37c881f..7044df2 100644
+index 5fad1dddb6..c678b67b97 100644
 --- a/chrome/app/framework.exports
 +++ b/chrome/app/framework.exports
-@@ -17,3 +17,11 @@
+@@ -16,6 +16,14 @@
+ # TODO(crbug.com/40274892): However there's also a second issue that #[no_mangle]
  # symbols get exported, which will need to be resolved too.
  
 +_CCSExtensionList
@@ -14,14 +15,18 @@ index 37c881f..7044df2 100644
 +_CCSExtensionSetSiteAccess
 +_CCSExtensionPerformAction
  _ChromeAppModeStart_v8
-diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 4ecd2c2..c5f7c11 100644
---- a/chrome/browser/ui/BUILD.gn
-+++ b/chrome/browser/ui/BUILD.gn
-@@ -3458,4 +3458,6 @@ static_library("ui") {
-       "browser_commands_mac.h",
-       "browser_commands_mac.mm",
-       "browser_mac.cc",
-+      "cobble/cobble_extensions.h",
-+      "cobble/cobble_extensions.mm",
-       "browser_mac.h",
+ _ChromeMain
+ _ChromeWebAppShortcutCopierMain
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 4a9e8adf1c..b067ab64de 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1705,6 +1705,8 @@ source_set("core") {
+       "ui/cobble/cobble_client_certificates.mm",
+       "ui/cobble/cobble_downloads.h",
+       "ui/cobble/cobble_downloads.mm",
++      "ui/cobble/cobble_extensions.h",
++      "ui/cobble/cobble_extensions.mm",
+       "ui/cobble/cobble_devtools.h",
+       "ui/cobble/cobble_devtools.mm",
+       "ui/cobble/cobble_extension_install_prompt.h",

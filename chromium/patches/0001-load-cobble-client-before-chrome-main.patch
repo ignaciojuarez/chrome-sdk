@@ -1,8 +1,8 @@
 diff --git a/chrome/app/chrome_exe_main_mac.cc b/chrome/app/chrome_exe_main_mac.cc
-index 8c027af..a14ab89 100644
+index f812b05fd7..c44134df8a 100644
 --- a/chrome/app/chrome_exe_main_mac.cc
 +++ b/chrome/app/chrome_exe_main_mac.cc
-@@ -214,6 +214,38 @@ __attribute__((visibility("default"))) int main(int argc, char* argv[]) {
+@@ -220,6 +220,38 @@ __attribute__((visibility("default"))) int main(int argc, char* argv[]) {
    if (!chrome_main) {
      FatalError("dlsym %s: %s.", entry_symbol, dlerror());
    }
