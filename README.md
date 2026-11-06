@@ -94,6 +94,9 @@ python3 scripts/assemble_harness.py "$WORK/src/out/Cobble/Chromium.app" \
 node scripts/smoke.mjs '/tmp/Cobble Chromium Harness.app'
 ```
 
+Browser-identity checks run separately:
+`python3 scripts/smoke_identity.py "$WORK/src/out/Cobble/Chromium.app" --artifacts /path/to/new-output`.
+
 The build can take hours and substantial memory. `--jobs` controls native build parallelism (default: 3). Builds for a new Chromium release require patch review and fresh runtime validation; changing the lock alone is insufficient.
 
 ## Layout

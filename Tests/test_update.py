@@ -291,6 +291,16 @@ class UpdateTests(unittest.TestCase):
                     compile_chrome(Path(directory), "sdk", 6, 720)
                 stop.assert_called_once_with(process.return_value.pid, __import__("signal").SIGTERM)
 
+    def test_compile_stops_its_process_group_on_any_interruption(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with (patch("build.sdk_build_inputs", return_value={}),
+                  patch("build.subprocess.Popen") as process,
+                  patch("build.os.killpg") as stop):
+                process.return_value.wait.side_effect = [OSError("interrupted"), 0]
+                with self.assertRaises(OSError):
+                    compile_chrome(Path(directory), "sdk", 6, 720)
+                stop.assert_called_once_with(process.return_value.pid, __import__("signal").SIGTERM)
+
     def test_probe_discovers_new_overlay_object_after_graph_regeneration(self):
         regenerated = False
         def run(command, **kwargs):
