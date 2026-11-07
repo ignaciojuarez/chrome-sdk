@@ -1,30 +1,30 @@
 diff --git a/chrome/browser/extensions/standard_management_policy_provider.cc b/chrome/browser/extensions/standard_management_policy_provider.cc
+index a15c58cf73..5e250630e4 100644
 --- a/chrome/browser/extensions/standard_management_policy_provider.cc
 +++ b/chrome/browser/extensions/standard_management_policy_provider.cc
-@@ -8,6 +8,7 @@
- 
- #include "base/logging.h"
+@@ -10,6 +10,7 @@
  #include "base/strings/utf_string_conversions.h"
+ #include "base/time/time.h"
+ #include "build/build_config.h"
 +#include "build/build_config.h"
  #include "chrome/browser/extensions/extension_management.h"
- #include "chrome/grit/generated_resources.h"
- #include "extensions/browser/managed_installation_mode.h"
-@@ -18,6 +19,10 @@
- #include "extensions/common/manifest.h"
- #include "extensions/strings/grit/extensions_strings.h"
- #include "ui/base/l10n/l10n_util.h"
-+
+ #include "chrome/browser/extensions/extension_util.h"
+ #include "chrome/browser/extensions/low_trust_policy_install_block_manager.h"
+@@ -28,6 +29,10 @@
+ #include "chrome/browser/extensions/policy_dse_ntp_override_metrics_reporter.h"
+ #endif
+ 
 +#if BUILDFLAG(IS_MAC)
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
 +#endif
- 
++
  static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
  
-@@ -107,6 +112,16 @@
-   if (Manifest::IsComponentLocation(extension->location())) {
+ namespace extensions {
+@@ -117,6 +122,16 @@ bool StandardManagementPolicyProvider::UserMayLoad(
      return true;
    }
-+
+ 
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsEnabled() &&
 +      (extension->is_theme() || extension->is_app())) {
@@ -34,6 +34,7 @@ diff --git a/chrome/browser/extensions/standard_management_policy_provider.cc b/
 +    return false;
 +  }
 +#endif
- 
++
    // Shared modules are always allowed too: they only contain resources that
    // are used by other extensions. The extension that depends on the shared
+   // module may be filtered by policy.

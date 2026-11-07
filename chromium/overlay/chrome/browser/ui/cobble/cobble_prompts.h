@@ -59,8 +59,13 @@ void HandleExternalProtocol(content::WebContents* contents,
                             bool primary_main_frame,
                             bool fenced_frame);
 bool PageHasPendingPrompt(content::WebContents* contents);
+// True when `frame` is `scope` or inside it. A null scope covers the page.
+bool FrameInScope(content::RenderFrameHost* frame,
+                  content::RenderFrameHost* scope);
+// A non-null `scope` cancels only that frame's and its children's prompts.
 void CancelPagePrompts(content::WebContents* contents,
-                       bool cancel_extension_install = true);
+                       bool cancel_extension_install = true,
+                       content::RenderFrameHost* scope = nullptr);
 
 }  // namespace cobble_chromium
 

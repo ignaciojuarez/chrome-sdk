@@ -1,4 +1,5 @@
 diff --git a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
+index c193579964..a9bf76540d 100644
 --- a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
 +++ b/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
 @@ -22,6 +22,10 @@
@@ -12,7 +13,7 @@ diff --git a/chrome/browser/ui/views/extensions/extension_install_dialog_view.cc
  #include "chrome/browser/ui/views/chrome_typography.h"
  #include "chrome/browser/ui/views/extensions/extension_permissions_view.h"
  #include "chrome/grit/generated_resources.h"
-@@ -730,5 +734,9 @@
+@@ -759,5 +763,9 @@ END_METADATA
  // static
  ExtensionInstallPrompt::ShowDialogCallback
  ExtensionInstallPrompt::GetDefaultShowDialogCallback() {

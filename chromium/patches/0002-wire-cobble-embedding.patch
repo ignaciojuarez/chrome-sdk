@@ -1,5 +1,5 @@
 diff --git a/chrome/app/framework.exports b/chrome/app/framework.exports
-index 37c881f..67d8a66 100644
+index 37c881f5d2..5fad1dddb6 100644
 --- a/chrome/app/framework.exports
 +++ b/chrome/app/framework.exports
 @@ -19,3 +19,74 @@
@@ -77,11 +77,45 @@ index 37c881f..67d8a66 100644
 +_CCSWebsiteDataListSites
 +_CCSWebsiteDataRemove
 +_CCSWebsiteDataRemoveSite
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 814b9d649a..4a9e8adf1c 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -1697,6 +1697,29 @@ source_set("core") {
+ 
+   if (is_mac) {
+     sources += [
++      "ui/cobble/cobble_browser_window.h",
++      "ui/cobble/cobble_browser_window.mm",
++      "ui/cobble/cobble_chromium.h",
++      "ui/cobble/cobble_chromium.mm",
++      "ui/cobble/cobble_client_certificates.h",
++      "ui/cobble/cobble_client_certificates.mm",
++      "ui/cobble/cobble_downloads.h",
++      "ui/cobble/cobble_downloads.mm",
++      "ui/cobble/cobble_devtools.h",
++      "ui/cobble/cobble_devtools.mm",
++      "ui/cobble/cobble_extension_install_prompt.h",
++      "ui/cobble/cobble_extension_install_prompt.mm",
++      "ui/cobble/cobble_identity.h",
++      "ui/cobble/cobble_identity.mm",
++      "ui/cobble/cobble_local_file.h",
++      "ui/cobble/cobble_local_file.mm",
++      "ui/cobble/cobble_page_operations.mm",
++      "ui/cobble/cobble_profile_deletion.h",
++      "ui/cobble/cobble_profile_deletion.mm",
++      "ui/cobble/cobble_prompts.h",
++      "ui/cobble/cobble_prompts.mm",
++      "ui/cobble/cobble_website_data.h",
++      "ui/cobble/cobble_website_data.mm",
+       "app_controller_mac.mm",
+       "browser_process_platform_part_mac.mm",
+       "chrome_browser_application_mac.mm",
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
-index 21d499a..2c1b31d 100644
+index 1651c5defa..268afea521 100644
 --- a/chrome/browser/chrome_browser_main.cc
 +++ b/chrome/browser/chrome_browser_main.cc
-@@ -78,6 +78,11 @@
+@@ -76,6 +76,11 @@
  #include "chrome/browser/ui/color/chrome_color_mixers.h"
  #include "chrome/browser/ui/javascript_dialogs/chrome_javascript_app_modal_dialog_view_factory.h"
  #include "chrome/browser/ui/profiles/profile_error_dialog.h"
@@ -93,7 +127,7 @@ index 21d499a..2c1b31d 100644
  #include "chrome/browser/ui/startup/bad_flags_prompt.h"
  #include "chrome/browser/ui/webui/chrome_untrusted_web_ui_configs.h"
  #include "chrome/browser/ui/webui/chrome_web_ui_configs.h"
-@@ -804,6 +809,21 @@ std::unique_ptr<content::BrowserMainParts> ChromeBrowserMainParts::Create(
+@@ -821,6 +826,21 @@ std::unique_ptr<content::BrowserMainParts> ChromeBrowserMainParts::Create(
  
  #if BUILDFLAG(IS_MAC)
    main_parts->AddParts(std::make_unique<ChromeBrowserMainExtraPartsMac>());
@@ -115,76 +149,42 @@ index 21d499a..2c1b31d 100644
  #endif
  
  #if BUILDFLAG(IS_CHROMEOS)
-diff --git a/chrome/browser/ui/BUILD.gn b/chrome/browser/ui/BUILD.gn
-index 4ecd2c2..9cacdcb 100644
---- a/chrome/browser/ui/BUILD.gn
-+++ b/chrome/browser/ui/BUILD.gn
-@@ -3455,6 +3455,29 @@ static_library("ui") {
- 
-   if (is_mac) {
-     sources += [
-+      "cobble/cobble_browser_window.h",
-+      "cobble/cobble_browser_window.mm",
-+      "cobble/cobble_chromium.h",
-+      "cobble/cobble_chromium.mm",
-+      "cobble/cobble_client_certificates.h",
-+      "cobble/cobble_client_certificates.mm",
-+      "cobble/cobble_downloads.h",
-+      "cobble/cobble_downloads.mm",
-+      "cobble/cobble_devtools.h",
-+      "cobble/cobble_devtools.mm",
-+      "cobble/cobble_extension_install_prompt.h",
-+      "cobble/cobble_extension_install_prompt.mm",
-+      "cobble/cobble_identity.h",
-+      "cobble/cobble_identity.mm",
-+      "cobble/cobble_local_file.h",
-+      "cobble/cobble_local_file.mm",
-+      "cobble/cobble_page_operations.mm",
-+      "cobble/cobble_profile_deletion.h",
-+      "cobble/cobble_profile_deletion.mm",
-+      "cobble/cobble_prompts.h",
-+      "cobble/cobble_prompts.mm",
-+      "cobble/cobble_website_data.h",
-+      "cobble/cobble_website_data.mm",
-       "browser_commands_mac.h",
-       "browser_commands_mac.mm",
-       "browser_mac.cc",
-diff --git a/chrome/browser/ui/views/frame/browser_window_factory.cc b/chrome/browser/ui/views/frame/browser_window_factory.cc
-index fff1235..f30d184 100644
---- a/chrome/browser/ui/views/frame/browser_window_factory.cc
-+++ b/chrome/browser/ui/views/frame/browser_window_factory.cc
-@@ -14,6 +14,11 @@
- #include "chrome/browser/ui/webui_browser/webui_browser_window.h"
- #include "ui/views/widget/widget.h"
- 
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 1defcfa514..a67e10f90e 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -591,6 +591,9 @@
+ #include "chrome/browser/screen_ai/screen_ai_install_state.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
 +#if BUILDFLAG(IS_MAC)
-+#include "chrome/browser/ui/cobble/cobble_browser_window.h"
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
 +#endif
-+
- #if defined(USE_AURA)
- #include "ui/aura/client/aura_constants.h"
- #include "ui/aura/window.h"
-@@ -30,7 +35,14 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter>
- BrowserWindow::CreateBrowserWindow(Browser* browser,
-                                    bool user_gesture,
-                                    bool in_tab_dragging) {
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/chrome_pages.h"
+@@ -4481,6 +4484,15 @@ bool ChromeContentBrowserClient::CanCreateWindow(
+       Profile::FromBrowserContext(web_contents->GetBrowserContext());
+   DCHECK(profile);
+   *no_javascript_access = false;
 +#if BUILDFLAG(IS_MAC)
-+  if (cobble_chromium::IsEnabled()) {
-+    return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(
-+        new CobbleBrowserWindow(browser));
++  if (cobble_chromium::IsEnabled() &&
++      !cobble_chromium::ShouldAllowPopup(
++          opener, opener_url, opener_top_level_frame_url, source_origin,
++          target_url, static_cast<int>(disposition), user_gesture,
++          opener_suppressed)) {
++    return false;
 +  }
 +#endif
-+
-   if (webui_browser::IsWebUIBrowserEnabled() &&
-       browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
-     return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(
-         new WebUIBrowserWindow(browser));
-
+ 
+   // A privileged WebContents (see //chrome's PrivilegedWebContents) must not
+   // create related windows: the new window would share an opener relationship
 diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+index 2e02cc461e..09f265bbb0 100644
 --- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 +++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-@@ -109,5 +109,7 @@
+@@ -118,6 +118,8 @@
+ #endif
  
  #if BUILDFLAG(IS_MAC)
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
@@ -192,7 +192,7 @@ diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_content
  #include "ui/display/display.h"
  #include "ui/display/screen.h"
  #include "ui/display/types/display_constants.h"
-@@ -331,6 +333,13 @@ void BrowserWebContentsDelegate::RequestPointerLock(
+@@ -335,6 +337,13 @@ void BrowserWebContentsDelegate::RequestPointerLock(
      content::WebContents* web_contents,
      bool user_gesture,
      bool last_unlocked_by_target) {
@@ -206,7 +206,7 @@ diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_content
    exclusive_access_manager_->pointer_lock_controller()->RequestToLockPointer(
        web_contents, user_gesture, last_unlocked_by_target);
  }
-@@ -350,12 +359,23 @@ bool BrowserWebContentsDelegate::IsWaitingForPointerLockPrompt(
+@@ -346,12 +355,23 @@ void BrowserWebContentsDelegate::LostPointerLock() {
  
  bool BrowserWebContentsDelegate::AllowKeyboardLockForInnerContents(
      content::WebContents* web_contents) {
@@ -230,8 +230,7 @@ diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_content
    exclusive_access_manager_->keyboard_lock_controller()->RequestKeyboardLock(
        web_contents, esc_key_locked);
  }
-@@ -1417,7 +1437,14 @@ void BrowserWebContentsDelegate::RequestMediaAccessPermission(
- void BrowserWebContentsDelegate::RequestMediaAccessPermission(
+@@ -1411,6 +1431,13 @@ void BrowserWebContentsDelegate::RequestMediaAccessPermission(
      content::WebContents* web_contents,
      const content::MediaStreamRequest& request,
      content::MediaResponseCallback callback) {
@@ -245,33 +244,33 @@ diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_content
    const extensions::Extension* extension =
        GetExtensionForOrigin(browser_->GetProfile(), request.security_origin);
    MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
-diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
---- a/chrome/browser/chrome_content_browser_client.cc
-+++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -571,6 +571,9 @@
- #include "chrome/browser/themes/theme_service.h"
- #include "chrome/browser/themes/theme_service_factory.h"
- #include "chrome/browser/ui/browser.h"
+diff --git a/chrome/browser/ui/views/frame/browser_window_factory.cc b/chrome/browser/ui/views/frame/browser_window_factory.cc
+index ad579aa818..d67a5259ac 100644
+--- a/chrome/browser/ui/views/frame/browser_window_factory.cc
++++ b/chrome/browser/ui/views/frame/browser_window_factory.cc
+@@ -15,6 +15,11 @@
+ #include "chrome/browser/ui/window_feature_controller/window_feature_controller.h"
+ #include "ui/views/widget/widget.h"
+ 
 +#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_browser_window.h"
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
 +#endif
- #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
- #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
- #include "chrome/browser/ui/chrome_pages.h"
-@@ -4411,7 +4414,16 @@ bool ChromeContentBrowserClient::CanCreateWindow(
-   Profile* profile =
-       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-   DCHECK(profile);
-   *no_javascript_access = false;
++
+ #if defined(USE_AURA)
+ #include "ui/aura/client/aura_constants.h"
+ #include "ui/aura/window.h"
+@@ -32,6 +37,13 @@ std::unique_ptr<BrowserWindow, BrowserWindowDeleter>
+ BrowserWindow::CreateBrowserWindow(BrowserWindowInterface* browser,
+                                    bool user_gesture,
+                                    bool in_tab_dragging) {
 +#if BUILDFLAG(IS_MAC)
-+  if (cobble_chromium::IsEnabled() &&
-+      !cobble_chromium::ShouldAllowPopup(
-+          opener, opener_url, opener_top_level_frame_url, source_origin,
-+          target_url, static_cast<int>(disposition), user_gesture,
-+          opener_suppressed)) {
-+    return false;
++  if (cobble_chromium::IsEnabled()) {
++    return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(
++        new CobbleBrowserWindow(static_cast<Browser*>(browser)));
 +  }
 +#endif
- 
-   // A privileged WebContents (see //chrome's PrivilegedWebContents) must not
-   // create related windows: the new window would share an opener relationship
++
+   if (webui_browser::IsWebUIBrowserEnabled() &&
+       browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
+     return std::unique_ptr<BrowserWindow, BrowserWindowDeleter>(

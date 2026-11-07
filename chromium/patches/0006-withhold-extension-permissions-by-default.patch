@@ -1,11 +1,45 @@
+diff --git a/extensions/browser/unpacked_installer.cc b/extensions/browser/unpacked_installer.cc
+index 91814e1612..667b46c74b 100644
+--- a/extensions/browser/unpacked_installer.cc
++++ b/extensions/browser/unpacked_installer.cc
+@@ -7,6 +7,7 @@
+ #include <string>
+ #include <utility>
+ 
++#include "base/feature_list.h"
+ #include "base/files/file_util.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
+@@ -44,6 +45,7 @@
+ #include "extensions/browser/requirements_checker.h"
+ #include "extensions/browser/ruleset_parse_result.h"
+ #include "extensions/buildflags/buildflags.h"
++#include "extensions/common/extension_features.h"
+ #include "extensions/common/constants.h"
+ #include "extensions/common/extension.h"
+ #include "extensions/common/extension_l10n_util.h"
+@@ -291,6 +293,13 @@ int UnpackedInstaller::GetFlags() {
+     result |= Extension::REQUIRE_MODERN_MANIFEST_VERSION;
+   }
+ 
++  // Cobble: withhold host access before the first load, as M153 did. The
++  // embedder must never activate an unpacked extension with broad access.
++  if (base::FeatureList::IsEnabled(
++          extensions_features::kExtensionInstallSiteAccessOptions)) {
++    result |= Extension::WITHHOLD_PERMISSIONS;
++  }
++
+   if (installed_via_cdp_) {
+     result |= Extension::INSTALLED_VIA_CDP;
+   }
 diff --git a/extensions/common/extension_features.cc b/extensions/common/extension_features.cc
-index 30be474beb28b72a54db8b0c65206eb0d66184c8..d261196704381286cf3508aeaa029293bbd83876 100644
+index 9652d229fb..f67b401ae3 100644
 --- a/extensions/common/extension_features.cc
 +++ b/extensions/common/extension_features.cc
-@@ -103,7 +103,7 @@ BASE_FEATURE(kApiDesktopAndroidNativeMessaging,
+@@ -105,7 +105,7 @@ BASE_FEATURE(kApiDesktopAndroidNativeMessagingBypassExtensionAllowlist,
  // For historical reasons, this includes some APIs. Please don't add more.
  
- BASE_FEATURE(kAllowWithholdingExtensionPermissionsOnInstall,
+ BASE_FEATURE(kExtensionInstallSiteAccessOptions,
 -             base::FEATURE_DISABLED_BY_DEFAULT);
 +             base::FEATURE_ENABLED_BY_DEFAULT);
  

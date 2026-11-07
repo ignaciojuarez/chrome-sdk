@@ -14,11 +14,13 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "chrome/browser/ui/unload_controller.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 
 class CobbleFindBar final : public FindBar {
@@ -241,12 +243,12 @@ class CobbleBrowserWindow final : public BrowserWindow,
       const input::NativeWebKeyboardEvent& event) override;
   bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override;
   std::unique_ptr<FindBar> CreateFindBar() override;
+  ui::AcceleratorProvider* GetAcceleratorProvider() override;
+  PinnedToolbarActions* GetPinnedToolbarActions() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHostFor(
       content::WebContents* contents) override;
   void ShowAvatarBubbleFromAvatarButton(bool source_accelerator) override;
-  void MaybeShowProfileSwitchIPH() override;
-  void MaybeShowSupervisedUserProfileSignInIPH() override;
   void ShowHatsDialog(
       const std::string& site_id,
       const std::optional<std::string>& histogram_name,

@@ -1,0 +1,29 @@
+diff --git a/chrome/browser/favicon/favicon_utils.cc b/chrome/browser/favicon/favicon_utils.cc
+index 398c6080a5..ff3b7a106e 100644
+--- a/chrome/browser/favicon/favicon_utils.cc
++++ b/chrome/browser/favicon/favicon_utils.cc
+@@ -34,6 +34,10 @@
+ #include "ui/native_theme/native_theme.h"
+ #include "ui/resources/grit/ui_resources.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ namespace favicon {
+ 
+ namespace {
+@@ -72,6 +76,13 @@ void CreateContentFaviconDriverForWebContents(
+   Profile* original_profile =
+       Profile::FromBrowserContext(web_contents->GetBrowserContext())
+           ->GetOriginalProfile();
++#if BUILDFLAG(IS_MAC)
++  // Cobble disables Chromium history; its favicon database would still map
++  // every visited page URL. Fetch icons as incognito does, storing nothing.
++  if (cobble_chromium::IsEnabled()) {
++    return ContentFaviconDriver::CreateForWebContents(web_contents, nullptr);
++  }
++#endif
+   return ContentFaviconDriver::CreateForWebContents(
+       web_contents,
+       FaviconServiceFactory::GetForProfile(original_profile,

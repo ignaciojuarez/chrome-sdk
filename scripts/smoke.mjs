@@ -1587,7 +1587,7 @@ async function main() {
       "--disable-component-update",
       "--disable-sync",
       "--no-pings",
-      "--enable-features=AllowWithholdingExtensionPermissionsOnInstall",
+      "--enable-features=ExtensionInstallSiteAccessOptions",
       `--ignore-certificate-errors-spki-list=${fixture.spkiAllowlist}`,
       "--host-resolver-rules=MAP cobble-mixed.test 127.0.0.1, MAP cobble-recovery.test 127.0.0.1, MAP cobble-auth.test 127.0.0.1, MAP cobble-auth-direct.test 127.0.0.1, MAP cobble-auth-cancel.test 127.0.0.1, MAP cobble-auth-subresource.test 127.0.0.1, MAP cobble-beforeunload.test 127.0.0.1, MAP cobble-crash.test 127.0.0.1, MAP cobble-a.test 127.0.0.1, MAP sub.cobble-a.test 127.0.0.1, MAP cobble-b.test 127.0.0.1, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost",
     ];
@@ -2262,7 +2262,8 @@ async function main() {
       "fileChooserPromptMoveRejected", "fileChooserMoveAfterResolution",
       "fileChooserPromptDevToolsRejected",
       "folderUploadEnumeratesNestedRelativePaths",
-      "fullscreenEnteredAndExited", "pointerLockDenied", "keyboardLockDeniedWithoutKeyCapture",
+      "fullscreenEnteredAndExited", "fullscreenWindowClosedAfterExit",
+      "pointerLockDenied", "keyboardLockDeniedWithoutKeyCapture",
       "deviceAndPaymentRequestsSettleDenied", "exclusivePageVisible",
       "pictureInPictureDeniedNoWindow", "documentPictureInPictureDeniedNoWindow",
       "displayMediaDeniedNoPicker",
@@ -2457,6 +2458,11 @@ async function main() {
     assert(permission?.status === "denied" && permission.code === 1 &&
       permission.secureContext === true,
     `SDK permission fixture was not denied: ${JSON.stringify(permission)}`);
+    // Refused prompts are dismissed, not stored as a permanent block.
+    const storedPermission = await evaluate(cdp,
+      `navigator.permissions.query({ name: "geolocation" }).then((status) => status.state)`);
+    assert(storedPermission === "prompt",
+      `A refused permission prompt was stored as ${storedPermission}`);
 
     const formValue = `Cobble state ${randomUUID()}`;
     const submittedValue = await evaluate(cdp, `(() => {

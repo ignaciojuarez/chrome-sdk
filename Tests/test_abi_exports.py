@@ -153,9 +153,8 @@ class ABIExportTests(unittest.TestCase):
         self.assertIn("+  if (resumption_disallowed_) {\n"
                       "+    return ResumeMode::INVALID;", patch)
         resume_start = patch.index("ResumptionRequestSource source) {")
-        resume_entry = patch[
-            resume_start:patch.index(
-                "diff --git a/chrome/browser/download/", resume_start)]
+        resume_end = patch.find("\ndiff --git ", resume_start)
+        resume_entry = patch[resume_start:resume_end if resume_end >= 0 else None]
         self.assertIn("state_ != INTERRUPTED_INTERNAL || resumption_disallowed_",
                       resume_entry)
         self.assertLess(resume_entry.index("resumption_disallowed_"),
@@ -186,7 +185,7 @@ class ABIExportTests(unittest.TestCase):
 
     def test_sdk_runtime_denies_unowned_picture_in_picture_windows(self):
         patch = (ROOT / "chromium/patches/0015-deny-unowned-browser-ui.patch").read_text()
-        document_gate = patch[patch.rindex("IsDocumentPictureInPictureBlockedBySystem"):]
+        document_gate = patch[patch.index("IsDocumentPictureInPictureBlockedBySystem() const {"):]
         self.assertIn("cobble_chromium::IsEnabled()", document_gate[:500])
         video = patch[patch.index("BrowserWebContentsDelegate::EnterPictureInPicture"):]
         self.assertIn("cobble_chromium::IsEnabled()", video[:600])

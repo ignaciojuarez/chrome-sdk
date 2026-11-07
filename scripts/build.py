@@ -378,7 +378,9 @@ def compile_chrome(work, variant, jobs, minutes, probe=False):
                     raise
                 if shutil.disk_usage(work).free < 8 * 1024 ** 3:
                     raise ValueError("Build stopped at the 8 GiB disk floor; preserve and resume the checkpoint")
-    except (subprocess.TimeoutExpired, ValueError, KeyboardInterrupt) as error:
+    except BaseException as error:
+        # Includes SIGTERM/SIGHUP (raised as KeyboardInterrupt by __main__):
+        # never release the build lock while the detached compiler still runs.
         os.killpg(process.pid, signal.SIGTERM)
         try:
             process.wait(timeout=30)
@@ -499,6 +501,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Unwind (and stop child builds) on termination instead of exiting abruptly.
+    for terminating in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(terminating, signal.default_int_handler)
     try:
         main()
     except (ValueError, OSError, subprocess.CalledProcessError) as error:

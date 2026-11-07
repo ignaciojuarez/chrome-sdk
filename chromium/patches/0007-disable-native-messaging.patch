@@ -1,4 +1,5 @@
 diff --git a/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc b/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc
+index 215f9ab7cb..efab4852a7 100644
 --- a/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc
 +++ b/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.cc
 @@ -12,13 +12,11 @@
@@ -15,7 +16,7 @@ diff --git a/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.c
  #include "extensions/buildflags/buildflags.h"
  #include "extensions/common/api/messaging/port_id.h"
  #include "extensions/common/extension.h"
-@@ -39,44 +37,11 @@
+@@ -39,44 +37,11 @@ ChromeMessagingDelegate::~ChromeMessagingDelegate() = default;
  
  MessagingDelegate::PolicyPermission
  ChromeMessagingDelegate::IsNativeMessagingHostAllowed(
@@ -23,7 +24,7 @@ diff --git a/chrome/browser/extensions/api/messaging/chrome_messaging_delegate.c
 -    const std::string& native_host_name) {
 +    content::BrowserContext*,
 +    const std::string&) {
-   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+   CHECK_CURRENTLY_ON(content::BrowserThread::UI, base::NotFatalUntil::M161);
 -
 -  PrefService* pref_service =
 -      Profile::FromBrowserContext(browser_context)->GetPrefs();

@@ -8,7 +8,10 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/functional/bind.h"
+#include "base/location.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autofill_bubble_handler.h"
@@ -504,14 +507,14 @@ void CobbleExclusiveAccessContext::EnterFullscreen(
                   weak_contents->Focus();
                 }
                 if (ExclusiveAccessManager* manager =
-                        browser->GetFeatures().exclusive_access_manager()) {
+                        ExclusiveAccessManager::From(browser)) {
                   manager->fullscreen_controller()
                       ->WindowFullscreenStateChanged();
                 }
               }
             onUserExit:^{
               if (ExclusiveAccessManager* manager =
-                      browser->GetFeatures().exclusive_access_manager()) {
+                      ExclusiveAccessManager::From(browser)) {
                 manager->ExitExclusiveAccess();
               }
             }]);
@@ -728,8 +731,11 @@ CobbleBrowserWindow::GetDownloadBubbleUIController() { return nullptr; }
 void CobbleBrowserWindow::ConfirmBrowserCloseWithPendingDownloads(
     int, UnloadController::DownloadCloseType,
     base::OnceCallback<void(bool)> callback) {
-  // Cobble owns quit and download UX. Never close the native Browser from here.
-  std::move(callback).Run(false);
+  // Cobble owns quit and download UX and has already emptied this window.
+  // Let the close proceed, never from inside UnloadController's own check:
+  // it stores its continuation only after this method returns.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), true));
 }
 void CobbleBrowserWindow::ShowAppMenu() {}
 void CobbleBrowserWindow::PreHandleDragUpdate(const content::DropData&,
@@ -743,6 +749,12 @@ CobbleBrowserWindow::PreHandleKeyboardEvent(
 }
 bool CobbleBrowserWindow::HandleKeyboardEvent(
     const input::NativeWebKeyboardEvent&) { return false; }
+ui::AcceleratorProvider* CobbleBrowserWindow::GetAcceleratorProvider() {
+  return nullptr;
+}
+PinnedToolbarActions* CobbleBrowserWindow::GetPinnedToolbarActions() {
+  return nullptr;
+}
 std::unique_ptr<FindBar> CobbleBrowserWindow::CreateFindBar() {
   return std::make_unique<CobbleFindBar>();
 }
@@ -755,8 +767,6 @@ CobbleBrowserWindow::GetWebContentsModalDialogHostFor(content::WebContents*) {
   return &modal_dialog_host_;
 }
 void CobbleBrowserWindow::ShowAvatarBubbleFromAvatarButton(bool) {}
-void CobbleBrowserWindow::MaybeShowProfileSwitchIPH() {}
-void CobbleBrowserWindow::MaybeShowSupervisedUserProfileSignInIPH() {}
 void CobbleBrowserWindow::ShowHatsDialog(
     const std::string&, const std::optional<std::string>&,
     const std::optional<uint64_t>, base::OnceClosure,

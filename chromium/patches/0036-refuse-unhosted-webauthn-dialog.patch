@@ -1,0 +1,47 @@
+diff --git a/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc b/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc
+index d90e0f67c7..4ddcd922a4 100644
+--- a/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc
++++ b/chrome/browser/ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc
+@@ -7,7 +7,12 @@
+ #include <memory>
+ #include <utility>
+ 
++#include "base/functional/bind.h"
++#include "base/location.h"
++#include "base/memory/scoped_refptr.h"
+ #include "base/scoped_observation.h"
++#include "base/task/sequenced_task_runner.h"
++#include "build/build_config.h"
+ #include "chrome/browser/ui/views/extensions/security_dialog_tracker.h"
+ #include "chrome/browser/ui/views/webauthn/authenticator_request_dialog_view.h"
+ #include "chrome/browser/ui/views/webauthn/authenticator_request_sheet_view.h"
+@@ -17,6 +22,10 @@
+ #include "components/web_modal/web_contents_modal_dialog_manager.h"
+ #include "ui/views/widget/widget.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ // static
+ std::unique_ptr<AuthenticatorRequestDialogViewController>
+ AuthenticatorRequestDialogViewController::Create(
+@@ -37,6 +46,18 @@ AuthenticatorRequestDialogViewController::Create(
+   if (!manager) {
+     return nullptr;
+   }
++#if BUILDFLAG(IS_MAC)
++  // Cobble's host-owned AppKit windows cannot anchor this Views dialog, which
++  // would abort the process. Fail the request (NotAllowedError) instead.
++  if (cobble_chromium::IsEnabled()) {
++    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE,
++        base::BindOnce(
++            &AuthenticatorRequestDialogModel::CancelAuthenticatorRequest,
++            base::WrapRefCounted(model)));
++    return nullptr;
++  }
++#endif
+ 
+   return std::make_unique<AuthenticatorRequestDialogViewControllerViews>(
+       web_contents, model);

@@ -1,18 +1,8 @@
-diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/extensions/api/_api_features.json
---- a/chrome/common/extensions/api/_api_features.json
-+++ b/chrome/common/extensions/api/_api_features.json
-@@ -645,6 +645,7 @@
-     "contexts": ["privileged_extension"]
-   },
-   "history": {
-+    "platforms": ["chromeos", "linux", "win"],
-     "dependencies": ["permission:history"],
-     "contexts": ["privileged_extension"]
-   },
 diff --git a/chrome/browser/history/history_tab_helper.cc b/chrome/browser/history/history_tab_helper.cc
+index 41e33ac73f..0eeab149c9 100644
 --- a/chrome/browser/history/history_tab_helper.cc
 +++ b/chrome/browser/history/history_tab_helper.cc
-@@ -625,6 +625,9 @@ void HistoryTabHelper::TitleWasSet(NavigationEntry* entry) {
+@@ -648,6 +648,9 @@ void HistoryTabHelper::TitleWasSet(NavigationEntry* entry) {
  }
  
  history::HistoryService* HistoryTabHelper::GetHistoryService() {
@@ -22,7 +12,7 @@ diff --git a/chrome/browser/history/history_tab_helper.cc b/chrome/browser/histo
    Profile* profile =
        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
    if (profile->IsOffTheRecord()) {
-@@ -633,6 +636,7 @@ history::HistoryService* HistoryTabHelper::GetHistoryService() {
+@@ -656,6 +659,7 @@ history::HistoryService* HistoryTabHelper::GetHistoryService() {
  
    return HistoryServiceFactory::GetForProfile(
        profile, ServiceAccessType::IMPLICIT_ACCESS);
@@ -30,3 +20,15 @@ diff --git a/chrome/browser/history/history_tab_helper.cc b/chrome/browser/histo
  }
  
  void HistoryTabHelper::WebContentsDestroyed() {
+diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/extensions/api/_api_features.json
+index 340a5e03ac..9f96796eda 100644
+--- a/chrome/common/extensions/api/_api_features.json
++++ b/chrome/common/extensions/api/_api_features.json
+@@ -541,6 +541,7 @@
+     "contexts": ["privileged_extension"]
+   },
+   "history": {
++    "platforms": ["chromeos", "linux", "win"],
+     "dependencies": ["permission:history"],
+     "contexts": ["privileged_extension"]
+   },

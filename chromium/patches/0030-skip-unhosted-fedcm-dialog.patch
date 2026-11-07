@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/webid/identity_dialog_controller.cc b/chrome/browser/ui/webid/identity_dialog_controller.cc
-index 8dc00b5c1e..56de21e192 100644
+index baf052ccc0..4ef867ef07 100644
 --- a/chrome/browser/ui/webid/identity_dialog_controller.cc
 +++ b/chrome/browser/ui/webid/identity_dialog_controller.cc
 @@ -37,6 +37,7 @@
@@ -10,7 +10,7 @@ index 8dc00b5c1e..56de21e192 100644
  #include "chrome/browser/ui/views/webid/fedcm_account_selection_view_desktop.h"  // nogncheck
  #include "components/tabs/public/tab_interface.h"  // nogncheck
  #endif
-@@ -619,6 +620,12 @@ bool IdentityDialogController::TrySetAccountView() {
+@@ -659,6 +660,12 @@ bool IdentityDialogController::TrySetAccountView() {
                    BrowserWindowInterface::Type::TYPE_DEVTOOLS) {
      return false;
    }

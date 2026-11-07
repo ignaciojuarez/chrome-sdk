@@ -5,7 +5,7 @@ A native macOS SDK built on Chromium, with a Swift API for embedding the browser
 | | |
 | --- | --- |
 | ABI | 19 (development; matched runtime required) |
-| Engine | Chromium 153.0.8010.37, pinned in [`chromium.lock.json`](chromium.lock.json) |
+| Engine | Chromium 157.0.8103.39, pinned in [`chromium.lock.json`](chromium.lock.json) |
 | Platform | Apple Silicon macOS |
 | Source | Swift 6, Objective-C++, C++, Python |
 | Status | Development build; no release signing or notarization |
@@ -93,6 +93,9 @@ python3 scripts/assemble_harness.py "$WORK/src/out/Cobble/Chromium.app" \
   --output '/tmp/Cobble Chromium Harness.app'
 node scripts/smoke.mjs '/tmp/Cobble Chromium Harness.app'
 ```
+
+Browser-identity checks run separately:
+`python3 scripts/smoke_identity.py "$WORK/src/out/Cobble/Chromium.app" --artifacts /path/to/new-output`.
 
 The build can take hours and substantial memory. `--jobs` controls native build parallelism (default: 3). Builds for a new Chromium release require patch review and fresh runtime validation; changing the lock alone is insufficient.
 

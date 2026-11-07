@@ -1,7 +1,8 @@
 diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+index 8b6b94c6f2..edec81870a 100644
 --- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 +++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-@@ -3,4 +3,8 @@
+@@ -4,6 +4,10 @@
  
  #include "chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h"
  
@@ -10,10 +11,15 @@ diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_content
 +#endif
 +
  #include "base/check_deref.h"
-@@ -1172,3 +1176,6 @@ void BrowserWebContentsDelegate::WebContentsCreated(
+ #include "base/functional/bind.h"
+ #include "base/memory/weak_ptr.h"
+@@ -1161,6 +1165,9 @@ void BrowserWebContentsDelegate::WebContentsCreated(
+   // to track `new_contents` after it is added to its TabModel this override can
    // be removed.
    CreateSessionServiceTabHelper(new_contents);
 +#if BUILDFLAG(IS_MAC)
 +  cobble_chromium::InheritIdentityPolicy(source_contents, new_contents);
 +#endif
  }
+ 
+ void BrowserWebContentsDelegate::RendererUnresponsive(

@@ -669,6 +669,12 @@ void StartRemoval(Profile* profile,
   uint64_t remove_mask = 0;
   if (category_mask & CCS_WEBSITE_DATA_SITE_DATA) {
     remove_mask |= chrome_browsing_data_remover::DATA_TYPE_SITE_DATA;
+    // Chromium history is disabled, but older favicon/predictor/reporting
+    // stores can hold visited URLs. HISTORY removes them; Chromium allows it
+    // only for all-site removal (it is not origin-filterable).
+    if (!domain) {
+      remove_mask |= chrome_browsing_data_remover::DATA_TYPE_HISTORY;
+    }
   }
   if (category_mask & CCS_WEBSITE_DATA_CACHE) {
     remove_mask |= content::BrowsingDataRemover::DATA_TYPE_CACHE;

@@ -1,0 +1,31 @@
+diff --git a/chrome/browser/predictors/loading_predictor_config.cc b/chrome/browser/predictors/loading_predictor_config.cc
+index a878c25f85..794fb41c09 100644
+--- a/chrome/browser/predictors/loading_predictor_config.cc
++++ b/chrome/browser/predictors/loading_predictor_config.cc
+@@ -5,14 +5,26 @@
+ #include "chrome/browser/predictors/loading_predictor_config.h"
+ 
+ #include "base/metrics/field_trial_params.h"
++#include "build/build_config.h"
+ #include "chrome/browser/predictors/predictors_features.h"
+ #include "chrome/browser/preloading/preloading_prefs.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "third_party/blink/public/common/features.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ namespace predictors {
+ 
+ bool IsLoadingPredictorEnabled(Profile* profile) {
++#if BUILDFLAG(IS_MAC)
++  // Cobble disables Chromium history; the predictor would still persist
++  // visited hosts and their resources.
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
+   // Disabled for off-the-record. Policy choice, not a technical limitation.
+   return profile && !profile->IsOffTheRecord();
+ }

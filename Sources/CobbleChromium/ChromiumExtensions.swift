@@ -234,7 +234,7 @@ private func extensionError(_ detail: String) -> ChromiumExtensionError {
     if detail == "Extensions are unavailable in private contexts." {
         return .privateContext
     }
-    if detail.contains("AllowWithholdingExtensionPermissionsOnInstall") {
+    if detail.contains("ExtensionInstallSiteAccessOptions") {
         return .hostPermissionWithholdingRequired
     }
     if detail.contains("popups are not supported") || detail.contains("side panels are not supported") {

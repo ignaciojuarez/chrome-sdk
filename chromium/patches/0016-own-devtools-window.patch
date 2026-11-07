@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/devtools/devtools_ui_bindings.cc b/chrome/browser/devtools/devtools_ui_bindings.cc
-index ff35d05..9799e09 100644
+index 11d60fabf3..54a080b2c7 100644
 --- a/chrome/browser/devtools/devtools_ui_bindings.cc
 +++ b/chrome/browser/devtools/devtools_ui_bindings.cc
 @@ -38,6 +38,9 @@
@@ -12,8 +12,8 @@ index ff35d05..9799e09 100644
  #include "chrome/browser/about_flags.h"
  #include "chrome/browser/browser_process.h"
  #include "chrome/browser/devtools/aida_service_handler.h"
-@@ -1318,6 +1321,17 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
-   content::WebContents* target_tab = delegate_->GetInspectedWebContents();
+@@ -1327,6 +1330,17 @@ void DevToolsUIBindings::LoadNetworkResource(DispatchCallback callback,
+   }
  
    NetworkResourceLoader::URLLoaderFactoryHolder url_loader_factory;
 +#if BUILDFLAG(IS_MAC)
@@ -30,7 +30,7 @@ index ff35d05..9799e09 100644
    if (gurl.SchemeIsFile()) {
      if (!is_local_frontend_) {
        if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-@@ -1421,6 +1435,11 @@ void DevToolsUIBindings::OpenSearchResultsInNewTab(const std::string& query) {
+@@ -1441,6 +1455,11 @@ void DevToolsUIBindings::OpenSearchResultsInNewTab(const std::string& query) {
  }
  
  void DevToolsUIBindings::ShowItemInFolder(const std::string& file_system_path) {
@@ -42,10 +42,10 @@ index ff35d05..9799e09 100644
    CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
          frontend_host_);
    if (!file_helper_.IsFileInFileSystem(file_system_path)) {
-@@ -1433,6 +1452,12 @@ void DevToolsUIBindings::SaveToFile(const std::string& url,
-                                     const std::string& content,
-                                     bool save_as,
-                                     bool is_base64) {
+@@ -1457,6 +1476,12 @@ void DevToolsUIBindings::SaveToFile(const std::string& url,
+     CanceledFileSaveAs(url);
+     return;
+   }
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
 +    CanceledFileSaveAs(url);
@@ -55,7 +55,7 @@ index ff35d05..9799e09 100644
    file_helper_.Save(
        url, content, save_as, is_base64,
        base::BindOnce(&DevToolsSelectFileDialog::SelectFile, web_contents_,
-@@ -1445,6 +1470,12 @@ void DevToolsUIBindings::SaveToFile(const std::string& url,
+@@ -1469,6 +1494,12 @@ void DevToolsUIBindings::SaveToFile(const std::string& url,
  
  void DevToolsUIBindings::AppendToFile(const std::string& url,
                                        const std::string& content) {
@@ -68,10 +68,10 @@ index ff35d05..9799e09 100644
    file_helper_.Append(url, content,
                        base::BindOnce(&DevToolsUIBindings::AppendedTo,
                                       weak_factory_.GetWeakPtr(), url));
-@@ -1453,6 +1484,13 @@ void DevToolsUIBindings::AppendToFile(const std::string& url,
- void DevToolsUIBindings::RequestFileSystems() {
-   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
-         frontend_host_);
+@@ -1483,6 +1514,13 @@ void DevToolsUIBindings::RequestFileSystems() {
+                      base::Value(std::move(empty_file_systems_value)));
+     return;
+   }
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
 +    CallClientMethod("DevToolsAPI", "fileSystemsLoaded",
@@ -82,10 +82,10 @@ index ff35d05..9799e09 100644
    base::ListValue file_systems_value;
    for (auto const& file_system : file_helper_.GetFileSystems()) {
      file_systems_value.Append(CreateFileSystemValue(file_system));
-@@ -1464,6 +1502,12 @@ void DevToolsUIBindings::RequestFileSystems() {
- void DevToolsUIBindings::AddFileSystem(const std::string& type) {
-   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
-         frontend_host_);
+@@ -1498,6 +1536,12 @@ void DevToolsUIBindings::AddFileSystem(const std::string& type) {
+     FileSystemAdded("Restricted to local DevTools", nullptr);
+     return;
+   }
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
 +    FileSystemAdded("File systems are unavailable in Cobble DevTools.", nullptr);
@@ -95,7 +95,7 @@ index ff35d05..9799e09 100644
    file_helper_.AddFileSystem(
        type,
        base::BindOnce(&DevToolsSelectFileDialog::SelectFile, web_contents_,
-@@ -1473,6 +1517,11 @@ void DevToolsUIBindings::AddFileSystem(const std::string& type) {
+@@ -1507,6 +1551,11 @@ void DevToolsUIBindings::AddFileSystem(const std::string& type) {
  }
  
  void DevToolsUIBindings::RemoveFileSystem(const std::string& file_system_path) {
@@ -107,7 +107,7 @@ index ff35d05..9799e09 100644
    CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
          frontend_host_);
    file_helper_.RemoveFileSystem(file_system_path);
-@@ -1480,6 +1529,12 @@ void DevToolsUIBindings::RemoveFileSystem(const std::string& file_system_path) {
+@@ -1514,6 +1563,12 @@ void DevToolsUIBindings::RemoveFileSystem(const std::string& file_system_path) {
  
  void DevToolsUIBindings::UpgradeDraggedFileSystemPermissions(
      const std::string& file_system_url) {
@@ -120,8 +120,8 @@ index ff35d05..9799e09 100644
    CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
          frontend_host_);
    file_helper_.UpgradeDraggedFileSystemPermissions(
-@@ -1496,6 +1551,12 @@ void DevToolsUIBindings::ConnectAutomaticFileSystem(
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+@@ -1530,6 +1585,12 @@ void DevToolsUIBindings::ConnectAutomaticFileSystem(
+   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M161);
    CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
          frontend_host_);
 +#if BUILDFLAG(IS_MAC)
@@ -133,10 +133,10 @@ index ff35d05..9799e09 100644
    // Ensure that the |file_system_uuid| is indeed a valid UUID.
    base::Uuid uuid = base::Uuid::ParseCaseInsensitive(file_system_uuid);
    if (!uuid.is_valid()) {
-@@ -1525,6 +1586,11 @@ void DevToolsUIBindings::ConnectAutomaticFileSystemDone(
+@@ -1559,6 +1620,11 @@ void DevToolsUIBindings::ConnectAutomaticFileSystemDone(
  void DevToolsUIBindings::DisconnectAutomaticFileSystem(
      const std::string& file_system_path) {
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M161);
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
 +    return;
@@ -145,10 +145,10 @@ index ff35d05..9799e09 100644
    CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
          frontend_host_);
    file_helper_.DisconnectAutomaticFileSystem(file_system_path);
-@@ -1537,6 +1603,12 @@ void DevToolsUIBindings::IndexPath(
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-   CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
-         frontend_host_);
+@@ -1575,6 +1641,12 @@ void DevToolsUIBindings::IndexPath(
+     IndexingDone(index_request_id, file_system_path);
+     return;
+   }
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
 +    IndexingDone(index_request_id, file_system_path);
@@ -158,10 +158,10 @@ index ff35d05..9799e09 100644
    if (!file_helper_.IsFileSystemAdded(file_system_path)) {
      IndexingDone(index_request_id, file_system_path);
      return;
-@@ -1584,6 +1656,12 @@ void DevToolsUIBindings::SearchInPath(int search_request_id,
+@@ -1622,6 +1694,12 @@ void DevToolsUIBindings::SearchInPath(int search_request_id,
                                        const std::string& file_system_path,
                                        const std::string& query) {
-   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M161);
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsOwnedDevTools(web_contents())) {
 +    SearchCompleted(search_request_id, file_system_path, {});
@@ -170,8 +170,8 @@ index ff35d05..9799e09 100644
 +#endif
    CHECK(IsValidFrontendURL(web_contents_->GetLastCommittedURL()) &&
          frontend_host_);
-   if (!file_helper_.IsFileSystemAdded(file_system_path)) {
-@@ -1627,6 +1705,11 @@ void DevToolsUIBindings::SetDevicesDiscoveryConfig(
+   if (!is_local_frontend_) {
+@@ -1670,6 +1748,11 @@ void DevToolsUIBindings::SetDevicesDiscoveryConfig(
      const std::string& port_forwarding_config,
      bool network_discovery_enabled,
      const std::string& network_discovery_config) {
@@ -183,7 +183,7 @@ index ff35d05..9799e09 100644
    std::optional<base::DictValue> parsed_port_forwarding =
        base::JSONReader::ReadDict(port_forwarding_config,
                                   base::JSON_PARSE_CHROMIUM_EXTENSIONS);
-@@ -1687,6 +1770,11 @@ void DevToolsUIBindings::SendPortForwardingStatus(base::Value status) {
+@@ -1730,6 +1813,11 @@ void DevToolsUIBindings::SendPortForwardingStatus(base::Value status) {
  }
  
  void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
@@ -196,11 +196,11 @@ index ff35d05..9799e09 100644
    NOTIMPLEMENTED();
  #else
 diff --git a/chrome/browser/devtools/devtools_window.cc b/chrome/browser/devtools/devtools_window.cc
-index 4bf7a56..364d907 100644
+index e9803277ee..db07434f3b 100644
 --- a/chrome/browser/devtools/devtools_window.cc
 +++ b/chrome/browser/devtools/devtools_window.cc
-@@ -42,6 +42,8 @@
- #include "chrome/browser/profiles/profile.h"
+@@ -49,6 +49,8 @@
+ #include "ui/base/window_open_disposition.h"
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/renderer_host/chrome_render_widget_host_view_mac_history_swiping_control.h"
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
@@ -208,7 +208,7 @@ index 4bf7a56..364d907 100644
  #endif
  #include "chrome/browser/search_engines/template_url_service_factory.h"
  #include "chrome/browser/tab_list/tab_list_interface.h"
-@@ -1403,6 +1405,12 @@ DevToolsWindow* DevToolsWindow::Create(
+@@ -1421,6 +1423,12 @@ DevToolsWindow* DevToolsWindow::Create(
    }
  #endif  // !BUILDFLAG(IS_ANDROID)
  
@@ -221,10 +221,10 @@ index 4bf7a56..364d907 100644
    // Create WebContents with devtools.
    GURL url(GetDevToolsURL(profile, frontend_type, frontend_url, can_dock, panel,
                            has_other_clients, browser_connection));
-@@ -1532,6 +1540,12 @@ WebContents* DevToolsWindow::OpenURLFromTab(
+@@ -1550,6 +1558,12 @@ WebContents* DevToolsWindow::OpenURLFromTab(
      base::OnceCallback<void(content::NavigationHandle&)>
          navigation_handle_callback) {
-   DCHECK(source == main_web_contents_);
+   CHECK(source == main_web_contents_, base::NotFatalUntil::M161);
 +#if BUILDFLAG(IS_MAC)
 +  if (cobble_chromium::IsOwnedDevTools(main_web_contents_) &&
 +      !params.url.SchemeIs(content::kChromeDevToolsScheme)) {
@@ -234,7 +234,7 @@ index 4bf7a56..364d907 100644
    if (!params.url.SchemeIs(content::kChromeDevToolsScheme)) {
      // TODO(https://crbug.com/40275094): Plumb the `navigation_handle_callback`.
      return OpenURLFromInspectedTab(params);
-@@ -1595,6 +1609,13 @@ WebContents* DevToolsWindow::AddNewContents(
+@@ -1613,6 +1627,13 @@ WebContents* DevToolsWindow::AddNewContents(
      return nullptr;
    }
  
@@ -248,7 +248,7 @@ index 4bf7a56..364d907 100644
    WebContents* inspected_web_contents = GetInspectedWebContents();
    if (inspected_web_contents) {
      inspected_web_contents->GetDelegate()->AddNewContents(
-@@ -1689,6 +1710,11 @@ void DevToolsWindow::BeforeUnloadFired(WebContents* tab,
+@@ -1707,6 +1728,11 @@ void DevToolsWindow::BeforeUnloadFired(WebContents* tab,
  
  content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager(
      WebContents* source) {
@@ -260,7 +260,7 @@ index 4bf7a56..364d907 100644
    return javascript_dialogs::AppModalDialogManager::GetInstance();
  }
  
-@@ -1696,6 +1722,12 @@ void DevToolsWindow::RunFileChooser(
+@@ -1714,6 +1740,12 @@ void DevToolsWindow::RunFileChooser(
      content::RenderFrameHost* render_frame_host,
      scoped_refptr<content::FileSelectListener> listener,
      const blink::mojom::FileChooserParams& params) {
@@ -273,7 +273,7 @@ index 4bf7a56..364d907 100644
    FileSelectHelper::RunFileChooser(render_frame_host, std::move(listener),
                                     params);
  }
-@@ -1742,6 +1774,11 @@ void DevToolsWindow::Close(DevToolsClosedByAction closed_by) {
+@@ -1760,6 +1792,11 @@ void DevToolsWindow::Close(DevToolsClosedByAction closed_by) {
  }
  
  void DevToolsWindow::Inspect(scoped_refptr<content::DevToolsAgentHost> host) {
@@ -285,7 +285,7 @@ index 4bf7a56..364d907 100644
    DevToolsWindow::OpenDevToolsWindow(host, profile_,
                                       DevToolsOpenedByAction::kUnknown);
  }
-@@ -1774,6 +1811,12 @@ void DevToolsWindow::SetIsDocked(bool dock_requested) {
+@@ -1792,6 +1829,12 @@ void DevToolsWindow::SetIsDocked(bool dock_requested) {
      return;
    }
  
@@ -295,10 +295,10 @@ index 4bf7a56..364d907 100644
 +  }
 +#endif
 +
-   DCHECK(can_dock_ || !dock_requested);
+   CHECK(can_dock_ || !dock_requested, base::NotFatalUntil::M161);
    if (!can_dock_) {
      dock_requested = false;
-@@ -1855,6 +1898,11 @@ int DevToolsWindow::GetClosedByForLogging() {
+@@ -1873,6 +1916,11 @@ int DevToolsWindow::GetClosedByForLogging() {
  }
  
  void DevToolsWindow::OpenInNewTab(const GURL& url) {
@@ -310,7 +310,7 @@ index 4bf7a56..364d907 100644
    GURL fixed_url = url;
    WebContents* inspected_web_contents = GetInspectedWebContents();
    int child_id = content::ChildProcessHost::kInvalidUniqueID;
-@@ -1962,6 +2010,11 @@ void DevToolsWindow::RenderProcessGone(bool crashed) {
+@@ -1981,6 +2029,11 @@ void DevToolsWindow::RenderProcessGone(bool crashed) {
  }
  
  void DevToolsWindow::ShowCertificateViewer(const std::string& cert_chain) {
@@ -322,7 +322,7 @@ index 4bf7a56..364d907 100644
    std::optional<base::Value> value =
        base::JSONReader::Read(cert_chain, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
    CHECK(value && value->is_list());
-@@ -2042,6 +2095,11 @@ void DevToolsWindow::ConnectionReady() {
+@@ -2061,6 +2114,11 @@ void DevToolsWindow::ConnectionReady() {
  }
  
  void DevToolsWindow::SetOpenNewWindowForPopups(bool value) {
@@ -334,7 +334,7 @@ index 4bf7a56..364d907 100644
    open_new_window_for_popups_ = value;
  }
  
-@@ -2085,8 +2143,19 @@ void DevToolsWindow::CreateDevToolsBrowser() {
+@@ -2104,8 +2162,19 @@ void DevToolsWindow::CreateDevToolsBrowser() {
        BrowserWindowInterface::CreationStatus::kOk) {
      return;
    }

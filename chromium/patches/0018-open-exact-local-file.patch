@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index bef01e2..d9790e0 100644
+index a836f9dfff..3b45ad7952 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -418,6 +418,7 @@
+@@ -431,6 +431,7 @@
  #include "services/network/public/cpp/features.h"
  #include "services/network/public/cpp/is_potentially_trustworthy.h"
  #include "services/network/public/cpp/network_switches.h"
@@ -10,15 +10,15 @@ index bef01e2..d9790e0 100644
  #include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
  #include "services/network/public/cpp/permissions_policy/permissions_policy_features.h"
  #include "services/network/public/cpp/resource_request.h"
-@@ -574,6 +575,7 @@
- #include "chrome/browser/ui/browser.h"
+@@ -595,6 +596,7 @@
+ #include "chrome/browser/themes/theme_service_factory.h"
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/cobble/cobble_chromium.h"
 +#include "chrome/browser/ui/cobble/cobble_local_file.h"
  #include "chrome/browser/ui/cobble/cobble_prompts.h"
  #endif
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-@@ -5624,6 +5626,7 @@ void ChromeContentBrowserClient::CreateThrottlesForNavigation(
+@@ -5828,6 +5830,7 @@ void ChromeContentBrowserClient::CreateThrottlesForNavigation(
      content::NavigationThrottleRegistry& registry) {
    CreateAndAddChromeThrottlesForNavigation(registry);
  #if BUILDFLAG(IS_MAC)
@@ -26,7 +26,7 @@ index bef01e2..d9790e0 100644
    content::NavigationHandle& handle = registry.GetNavigationHandle();
    if (cobble_chromium::PageForWebContents(handle.GetWebContents()) &&
        handle.IsPost() && handle.GetReloadType() != content::ReloadType::NONE) {
-@@ -6167,6 +6170,13 @@ ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory(
+@@ -6443,6 +6446,13 @@ ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory(
        content::WebContents::FromFrameTreeNodeId(frame_tree_node_id);
    content::BrowserContext* browser_context = web_contents->GetBrowserContext();
  
@@ -40,7 +40,7 @@ index bef01e2..d9790e0 100644
  #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
    if (scheme == extensions::kExtensionScheme) {
      if (!ChromeContentBrowserClientExtensionsPart::
-@@ -6269,6 +6279,13 @@ void ChromeContentBrowserClient::
+@@ -6545,6 +6555,13 @@ void ChromeContentBrowserClient::
    DCHECK(browser_context);
    DCHECK(factories);
  
@@ -54,7 +54,7 @@ index bef01e2..d9790e0 100644
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
    if (content::AreIsolatedWebAppsEnabled(browser_context) &&
-@@ -6315,6 +6332,13 @@ void ChromeContentBrowserClient::
+@@ -6591,6 +6608,13 @@ void ChromeContentBrowserClient::
    DCHECK(browser_context);
    DCHECK(factories);
  
@@ -68,7 +68,7 @@ index bef01e2..d9790e0 100644
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
    if (content::AreIsolatedWebAppsEnabled(browser_context) &&
-@@ -6570,6 +6594,13 @@ void ChromeContentBrowserClient::
+@@ -6859,6 +6883,13 @@ void ChromeContentBrowserClient::
          int render_frame_id,
          const std::optional<url::Origin>& request_initiator_origin,
          NonNetworkURLLoaderFactoryMap* factories) {
@@ -83,10 +83,10 @@ index bef01e2..d9790e0 100644
      !BUILDFLAG(IS_ANDROID)
    content::RenderFrameHost* frame_host =
 diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
-index d0ff431..0fb5b75 100644
+index 67f567f9c8..6b4147179e 100644
 --- a/chrome/browser/download/chrome_download_manager_delegate.cc
 +++ b/chrome/browser/download/chrome_download_manager_delegate.cc
-@@ -34,6 +34,7 @@
+@@ -35,6 +35,7 @@
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/cobble/cobble_chromium.h"
  #include "chrome/browser/ui/cobble/cobble_downloads.h"
@@ -94,7 +94,7 @@ index d0ff431..0fb5b75 100644
  #endif
  #include "chrome/browser/browser_process.h"
  #include "chrome/browser/download/download_core_service.h"
-@@ -2417,6 +2418,12 @@ void ChromeDownloadManagerDelegate::CheckDownloadAllowed(
+@@ -2498,6 +2499,12 @@ void ChromeDownloadManagerDelegate::CheckDownloadAllowed(
    }
  #endif
    content::WebContents* web_contents = web_contents_getter.Run();
@@ -108,7 +108,7 @@ index d0ff431..0fb5b75 100644
      OnCheckDownloadAllowedFailed(std::move(check_download_allowed_cb));
      return;
 diff --git a/chrome/browser/renderer_host/chrome_navigation_ui_data.cc b/chrome/browser/renderer_host/chrome_navigation_ui_data.cc
-index 8337d6c..5432c18 100644
+index 8337d6c0a9..5432c182cd 100644
 --- a/chrome/browser/renderer_host/chrome_navigation_ui_data.cc
 +++ b/chrome/browser/renderer_host/chrome_navigation_ui_data.cc
 @@ -112,6 +112,7 @@ std::unique_ptr<content::NavigationUIData> ChromeNavigationUIData::Clone() {
@@ -120,7 +120,7 @@ index 8337d6c..5432c18 100644
    copy->twa_launch_token_ = twa_launch_token_;
  #endif
 diff --git a/chrome/browser/renderer_host/chrome_navigation_ui_data.h b/chrome/browser/renderer_host/chrome_navigation_ui_data.h
-index b2f962a..cf95e53 100644
+index b2f962acbf..cf95e534af 100644
 --- a/chrome/browser/renderer_host/chrome_navigation_ui_data.h
 +++ b/chrome/browser/renderer_host/chrome_navigation_ui_data.h
 @@ -92,6 +92,13 @@ class ChromeNavigationUIData : public content::NavigationUIData {
@@ -148,10 +148,10 @@ index b2f962a..cf95e53 100644
    // Unique token generated in Java to identify a TWA launch associated with
    // this navigation.
 diff --git a/content/browser/loader/file_url_loader_factory.cc b/content/browser/loader/file_url_loader_factory.cc
-index efe07be..0fec75f 100644
+index cea8f3eafd..a65d0e7169 100644
 --- a/content/browser/loader/file_url_loader_factory.cc
 +++ b/content/browser/loader/file_url_loader_factory.cc
-@@ -393,6 +393,7 @@ class FileURLLoader : public network::mojom::URLLoader {
+@@ -394,6 +394,7 @@ class FileURLLoader : public network::mojom::URLLoader {
        LinkFollowingPolicy link_following_policy,
        std::unique_ptr<FileURLLoaderObserver> observer,
        scoped_refptr<net::HttpResponseHeaders> extra_response_headers,
@@ -159,7 +159,7 @@ index efe07be..0fec75f 100644
        file_access::ScopedFileAccess file_access) {
      // Owns itself. Will live as long as its URLLoader and URLLoaderClient
      // bindings are alive - essentially until either the client gives up or all
-@@ -402,7 +403,8 @@ class FileURLLoader : public network::mojom::URLLoader {
+@@ -403,7 +404,8 @@ class FileURLLoader : public network::mojom::URLLoader {
          profile_path, request, response_type, std::move(loader),
          std::move(client_remote), directory_loading_policy, file_access_policy,
          link_following_policy, std::move(observer),
@@ -169,7 +169,7 @@ index efe07be..0fec75f 100644
    }
  
    FileURLLoader(const FileURLLoader&) = delete;
-@@ -429,7 +431,7 @@ class FileURLLoader : public network::mojom::URLLoader {
+@@ -430,7 +432,7 @@ class FileURLLoader : public network::mojom::URLLoader {
            redirect_data->file_access_policy,
            redirect_data->link_following_policy,
            std::move(redirect_data->observer),
@@ -178,7 +178,7 @@ index efe07be..0fec75f 100644
            std::move(*redirect_data->file_access.release()));
      }
      MaybeDeleteSelf();
-@@ -470,6 +472,7 @@ class FileURLLoader : public network::mojom::URLLoader {
+@@ -471,6 +473,7 @@ class FileURLLoader : public network::mojom::URLLoader {
               LinkFollowingPolicy link_following_policy,
               std::unique_ptr<FileURLLoaderObserver> observer,
               scoped_refptr<net::HttpResponseHeaders> extra_response_headers,
@@ -186,7 +186,7 @@ index efe07be..0fec75f 100644
               file_access::ScopedFileAccess file_access) {
      // ClusterFuzz depends on the following VLOG to get resource dependencies.
      // See crbug.com/715656.
-@@ -498,7 +501,8 @@ class FileURLLoader : public network::mojom::URLLoader {
+@@ -499,7 +502,8 @@ class FileURLLoader : public network::mojom::URLLoader {
      }
  
      base::File::Info info;
@@ -196,7 +196,7 @@ index efe07be..0fec75f 100644
        OnClientComplete(net::ERR_FILE_NOT_FOUND, std::move(observer));
        return;
      }
-@@ -541,7 +545,9 @@ class FileURLLoader : public network::mojom::URLLoader {
+@@ -543,7 +547,9 @@ class FileURLLoader : public network::mojom::URLLoader {
      }
  
      // Full file path with all symbolic links resolved.
@@ -207,7 +207,7 @@ index efe07be..0fec75f 100644
      if (file_access_policy == FileAccessPolicy::kRestricted &&
          !GetContentClient()->browser()->IsFileAccessAllowed(path, full_path,
                                                              profile_path)) {
-@@ -619,9 +625,13 @@ class FileURLLoader : public network::mojom::URLLoader {
+@@ -629,9 +635,13 @@ class FileURLLoader : public network::mojom::URLLoader {
        observer->OnStart();
      }
  
@@ -224,7 +224,7 @@ index efe07be..0fec75f 100644
  
      std::vector<char> initial_read_buffer(net::kMaxBytesToSniff);
      auto read_result =
-@@ -933,7 +943,7 @@ void FileURLLoaderFactory::CreateLoaderAndStartInternal(
+@@ -944,7 +954,7 @@ void FileURLLoaderFactory::CreateLoaderAndStartInternal(
                         FileAccessPolicy::kRestricted,
                         LinkFollowingPolicy::kFollow,
                         std::unique_ptr<FileURLLoaderObserver>(),
@@ -233,7 +233,7 @@ index efe07be..0fec75f 100644
      if (auto* file_access = file_access::ScopedFileAccessDelegate::Get()) {
        // If the request has an initiator use it as source for the dlp check.
        // Requests with no initiator e.g. user actions the request should be
-@@ -993,7 +1003,7 @@ void CreateFileURLLoaderBypassingSecurityChecks(
+@@ -1004,7 +1014,7 @@ void CreateFileURLLoaderBypassingSecurityChecks(
                             : DirectoryLoadingPolicy::kFail,
                         FileAccessPolicy::kUnrestricted,
                         LinkFollowingPolicy::kDoNotFollow, std::move(observer),
@@ -242,7 +242,7 @@ index efe07be..0fec75f 100644
      file_access::ScopedFileAccessDelegate::RequestFilesAccessForSystemIO(
          {path}, std::move(create_and_start_cb));
    } else {
-@@ -1003,6 +1013,32 @@ void CreateFileURLLoaderBypassingSecurityChecks(
+@@ -1014,6 +1024,32 @@ void CreateFileURLLoaderBypassingSecurityChecks(
    }
  }
  
@@ -276,7 +276,7 @@ index efe07be..0fec75f 100644
  CreateFileURLLoaderFactory(
      const base::FilePath& profile_path,
 diff --git a/content/public/browser/file_url_loader.h b/content/public/browser/file_url_loader.h
-index 1791452..f23d7a9 100644
+index 179145279a..f23d7a9aad 100644
 --- a/content/public/browser/file_url_loader.h
 +++ b/content/public/browser/file_url_loader.h
 @@ -7,6 +7,7 @@

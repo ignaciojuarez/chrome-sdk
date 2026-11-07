@@ -106,7 +106,7 @@ implementation, and regression test are all required before enabling a surface.
 | P02 | Qualify | Real microphone/camera hardware, denied/revoked TCC, device loss and multiple captures |
 | P03 | Implemented | ABI 19 routes `getDisplayMedia` to the host with origin/frame identity; the host chooses window or screen and the macOS content-sharing picker selects the source. Video only; tab capture and display/system audio are not offered. Capture state and stop are separate from camera/microphone. Fake-device fixture covers request, grant, state, stop and denial; real picker/site qualification pending |
 | P04 | Missing | Granular capture mute/stop controls; current stop terminates all user-media streams |
-| P05 | Missing | General permission check/request/result bridge with consistent revocation; the current runtime denies unowned permission prompts except window management, which ABI 19 routes to the host |
+| P05 | Missing | General permission check/request/result bridge with consistent revocation; the current runtime denies unowned permission prompts except window management, which ABI 19 routes to the host. `--deny-permission-prompts` persists each denial (and a blocked second automatic download) as a Chromium BLOCK setting that site-data removal does not clear |
 | P06 | Missing | Geolocation consent, accuracy selection and revocation through owned UI |
 | P07 | Missing | Notification permission plus macOS notification delivery/click lifecycle |
 | P08 | Missing | Clipboard read permission UI and origin-bound cancellation |
@@ -120,7 +120,7 @@ implementation, and regression test are all required before enabling a surface.
 | P16 | Present | Client-certificate selection uses native keys, bounded metadata and exact navigation/document context |
 | P17 | Qualify | Real enterprise mTLS, smart cards, expired certificates and Keychain access prompts |
 | P18 | Missing | Owned FedCM account chooser; patch 0030 currently refuses the unhosted dialog |
-| P19 | Qualify | WebAuthn/passkeys, Touch ID, security keys, conditional mediation and cancellation |
+| P19 | Qualify | WebAuthn/passkeys, Touch ID, security keys, conditional mediation and cancellation. The Views authenticator sheet has no Cobble host and can abort the process; no guard like the FedCM one exists |
 | P20 | Qualify | Apple Passwords system helper integration and real-site Sign in with Apple |
 | P21 | Excluded | Cobble-managed password vault, Chrome account sync and telemetry |
 | P22 | Missing | Address/payment autofill UI; current bubble handler does not provide complete surfaces |
@@ -137,7 +137,7 @@ implementation, and regression test are all required before enabling a surface.
 | D06 | Fixed | Release and cancellation make late Swift callbacks inert |
 | D07 | Missing | Restart-persistent download recovery; current handles are process-local |
 | D08 | Implemented | ABI 18 original/current URLs, MIME, normalized byte counts and native interruption code; retry and completion metadata fixtures passed |
-| D09 | Qualify | Safe Browsing/download verdict availability in the shipped unbranded runtime |
+| D09 | Qualify | Safe Browsing/download verdict availability in the shipped unbranded runtime. GN args set no Google API key, which list updates require, so protection is likely inactive |
 | D10 | Present | Exact local-file descriptor authorization; rejects directories, symlinks and adjacent access |
 | D11 | Missing | Local PDF viewing through the authorized-file path; native explicitly rejects it |
 | D12 | Missing | User-authorized document bundles/subresources; do not grant parent directories implicitly |
@@ -176,7 +176,7 @@ implementation, and regression test are all required before enabling a surface.
 | E06 | Missing | Extension side-panel host; currently reports unsupported |
 | E07 | Qualify | Chrome Web Store installation, signed CRX validation, update consent and restart |
 | E08 | Missing | Private extension access with explicit opt-in and isolated events/storage; currently denied |
-| E09 | Qualify | MV3 workers, alarms, commands, messaging and native tabs/windows topology across restarts |
+| E09 | Qualify | MV3 workers, alarms, messaging and native tabs/windows topology across restarts. Manifest `commands` cannot fire: Chrome creates the shortcut registry only for Views browser windows |
 | E10 | Qualify | Options pages, external links, downloads and host-window ownership in arbitrary extensions |
 | E11 | Present | Bounded DNR blocker subset and readiness before requests; no script injection |
 | E12 | Missing | Filter-list conversion, cosmetics and richer rules; current API deliberately accepts a subset |
@@ -206,7 +206,7 @@ implementation, and regression test are all required before enabling a surface.
 | B17 | Missing | Fuzzing/property coverage for ABI strings, JSON records, manifests and patch application |
 | B18 | Qualify | Developer ID signing, notarization, stapling, clean install, rollback and sustained everyday use |
 | B19 | Host | App update feed, release channels, source pin advancement and user-facing update UX |
-| B20 | Present | Update discovery reports 154.0.8037.98 available above pinned 153.0.8010.37; source update, patch rebase and matched runtime qualification remain outstanding |
+| B20 | Present | Rebased from 153.0.8010.37 to 157.0.8103.39 (Mac Stable, 2026-11-06); keep pace with each Stable milestone. Discovery can propose Early Stable builds served to 0.5% |
 | B21 | Missing | Documented security-patch owner/response deadline and emergency runtime rollback exercise |
 | B22 | Missing | Automated native CI runner capacity sufficient for repeatable full SDK acceptance |
 
@@ -318,3 +318,18 @@ This completes the automated native smoke gate; broader manual focus,
 accessibility and IME qualification remain separate.
 No public release, real-account test, hardware permission grant, or signing/notarization
 qualification is implied by this audit.
+
+## Chromium 157 validation (2026-11-06)
+
+The 157.0.8103.39 rebase passed the isolated harness: 251 of 251 native checks,
+plus navigation, DOM, forms, rendering, WebGL2, downloads, clean shutdown and
+empty History tables. The harness found and drove four fixes: find request IDs
+(157 starts at zero), getDisplayMedia activation (Chrome's own rule), prompts of
+removed frames, and site-specific removal (HISTORY is all-sites only).
+
+Chromium 157 refuses page fullscreen unless the page view has focus in the key
+window, so the harness now focuses the page first, as a real click does. The
+former PiP, document PiP and display-media containment failures were the
+harness counting the page's own fullscreen window and AppKit Space windows as
+escapes; a new check requires that fullscreen window to close after exit.
+Real sites, hardware and release qualification remain open.

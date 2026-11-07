@@ -1,8 +1,8 @@
 diff --git a/media/base/media_switches.cc b/media/base/media_switches.cc
-index 9c03865..7308d2a 100644
+index af08e2530c..98cc1e3c92 100644
 --- a/media/base/media_switches.cc
 +++ b/media/base/media_switches.cc
-@@ -1528,7 +1528,9 @@ BASE_FEATURE(kMacCatapLoopbackAudioForScreenShare,
+@@ -1538,7 +1538,9 @@ BASE_FEATURE(kMacCatapLoopbackAudioForCast, base::FEATURE_ENABLED_BY_DEFAULT);
  // Use the built-in MacOS screen-sharing picker (SCContentSharingPicker). This
  // flag will only use the built-in picker on MacOS 15 Sequoia and later where it
  // is required to avoid recurring permission dialogs.
