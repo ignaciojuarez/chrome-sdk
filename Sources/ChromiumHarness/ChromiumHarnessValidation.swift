@@ -1387,6 +1387,16 @@ enum HarnessValidation {
             try validationPage.load(configuration.exclusiveAccess)
             try await wait(for: validationPage, url: configuration.exclusiveAccess,
                            title: configuration.exclusiveReadyTitle)
+            // Chromium 157 refuses page fullscreen unless the page view has
+            // focus in the key window, as after a real click.
+            NSApp.activate(ignoringOtherApps: true)
+            validationPage.nativeView.window?.makeKeyAndOrderFront(nil)
+            validationPage.focus()
+            try? await waitForCondition("exclusive page key window") {
+                validationPage.nativeView.window?.isKeyWindow == true
+            }
+            FileHandle.standardError.write(Data(
+                "exclusive focus key=\(validationPage.nativeView.window?.isKeyWindow ?? false)\n".utf8))
             let exclusiveWindowIDs = Set(NSApp.windows.map(ObjectIdentifier.init))
             try JSONSerialization.data(withJSONObject: [
                 "url": configuration.exclusiveAccess.absoluteString,
@@ -1405,7 +1415,8 @@ enum HarnessValidation {
             try await wait(for: validationPage, url: configuration.exclusiveAccess,
                            title: configuration.exclusiveDeniedTitle, timeout: .seconds(32))
             let exclusiveDOM = try await validationPage.currentDOM()
-            let capabilityOutcomes = ["bluetooth", "usb", "serial", "hid", "payment"].map {
+            let capabilityOutcomes = ["fullscreen-outcome", "fullscreen-entered-and-exited",
+                                      "bluetooth", "usb", "serial", "hid", "payment"].map {
                 "\($0)=\(attribute(named: $0, in: exclusiveDOM) ?? "missing")"
             }.joined(separator: " ")
             FileHandle.standardError.write(Data("exclusive capabilities \(capabilityOutcomes)\n".utf8))
@@ -1426,8 +1437,27 @@ enum HarnessValidation {
                         exclusiveDOM.contains("data-\($0)=\"empty\"") ||
                         exclusiveDOM.contains("data-\($0)=\"unavailable\"")
                 }
-            let noCapabilityWindowEscaped = Set(NSApp.windows.map(ObjectIdentifier.init)) ==
-                exclusiveWindowIDs
+            // The page's own fullscreen Space (fullscreen runs first) must close
+            // after exit. Its AppKit Space machinery (NS* windows) is not an
+            // escape; any other new visible window, such as a Views PiP, is.
+            let ownedFullscreen = { (window: NSWindow) in
+                NSStringFromClass(type(of: window)) == "CobbleContentFullscreenWindow"
+            }
+            try? await waitForCondition("page fullscreen window closed") {
+                !NSApp.windows.contains { ownedFullscreen($0) && $0.isVisible }
+            }
+            checks["fullscreenWindowClosedAfterExit"] =
+                !NSApp.windows.contains { ownedFullscreen($0) && $0.isVisible }
+            let escapedWindows = NSApp.windows.filter {
+                let name = NSStringFromClass(type(of: $0))
+                return $0.isVisible && !exclusiveWindowIDs.contains(ObjectIdentifier($0)) &&
+                    !ownedFullscreen($0) && !name.hasPrefix("NS") && !name.hasPrefix("_NS")
+            }
+            let noCapabilityWindowEscaped = escapedWindows.isEmpty
+            if !escapedWindows.isEmpty {
+                let names = escapedWindows.map { NSStringFromClass(type(of: $0)) }
+                FileHandle.standardError.write(Data("exclusive escaped windows \(names)\n".utf8))
+            }
             checks["pictureInPictureDeniedNoWindow"] =
                 exclusiveDOM.contains("data-pip=\"rejected\"") &&
                 exclusiveDOM.contains("data-pip-activation=\"true\"") &&

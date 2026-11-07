@@ -318,3 +318,18 @@ This completes the automated native smoke gate; broader manual focus,
 accessibility and IME qualification remain separate.
 No public release, real-account test, hardware permission grant, or signing/notarization
 qualification is implied by this audit.
+
+## Chromium 157 validation (2026-11-06)
+
+The 157.0.8103.39 rebase passed the isolated harness: 251 of 251 native checks,
+plus navigation, DOM, forms, rendering, WebGL2, downloads, clean shutdown and
+empty History tables. The harness found and drove four fixes: find request IDs
+(157 starts at zero), getDisplayMedia activation (Chrome's own rule), prompts of
+removed frames, and site-specific removal (HISTORY is all-sites only).
+
+Chromium 157 refuses page fullscreen unless the page view has focus in the key
+window, so the harness now focuses the page first, as a real click does. The
+former PiP, document PiP and display-media containment failures were the
+harness counting the page's own fullscreen window and AppKit Space windows as
+escapes; a new check requires that fullscreen window to close after exit.
+Real sites, hardware and release qualification remain open.
