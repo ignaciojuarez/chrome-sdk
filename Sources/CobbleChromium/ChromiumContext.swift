@@ -28,10 +28,12 @@ import CCobbleChromium
                 handle, callback == nil ? nil : Unmanaged.passUnretained(self).toOpaque(), callback)
         }
     }
-    /// Answers Chromium's window-management status checks, including quiet checks
-    /// on load and `permissions.query`, from the host's saved decisions. Called
-    /// synchronously on Chromium's UI thread with serialized origins; do not
-    /// navigate or close the context from it.
+    /// Answers Chromium's camera, microphone and window-management status checks,
+    /// including quiet checks on load, `enumerateDevices` device details and
+    /// `permissions.query`, from the host's saved decisions. Camera and microphone
+    /// pass the top-level origin as both origins. Called synchronously on
+    /// Chromium's UI thread with serialized origins; do not navigate or close the
+    /// context from it.
     public var permissionResolver: ((ChromiumMediaPermissionKinds, String, String) -> ChromiumPermissionSetting)? {
         didSet {
             guard !isClosed else { return }
@@ -99,9 +101,11 @@ import CCobbleChromium
     }
 
     /// Forgets Chromium's session grant for a serialized origin such as `https://example.com`.
-    /// Only `.windowManagement` is stored by Chromium.
+    /// Accepts `.camera`, `.microphone` and `.windowManagement`; allowing camera or
+    /// microphone leaves a one-time grant for the request's top-level origin.
     @discardableResult public func resetPermission(_ kinds: ChromiumMediaPermissionKinds, origin: String) -> Bool {
-        guard !isClosed, kinds == .windowManagement else { return false }
+        guard !isClosed, !kinds.isEmpty,
+              kinds.isSubset(of: [.camera, .microphone, .windowManagement]) else { return false }
         return runtime.api.context_reset_permission?(handle, origin, kinds.rawValue) == 1
     }
 

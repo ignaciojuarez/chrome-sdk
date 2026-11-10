@@ -1,0 +1,67 @@
+diff --git a/chrome/browser/media/webrtc/media_stream_device_permission_context.cc b/chrome/browser/media/webrtc/media_stream_device_permission_context.cc
+index 20e9025814..e4988ebb9b 100644
+--- a/chrome/browser/media/webrtc/media_stream_device_permission_context.cc
++++ b/chrome/browser/media/webrtc/media_stream_device_permission_context.cc
+@@ -58,8 +58,17 @@ network::mojom::PermissionsPolicyFeature GetPermissionsPolicyFeature(
+   return network::mojom::PermissionsPolicyFeature::kCamera;
+ }
+ 
++MediaStreamDevicePermissionContext::EmbedderStatusResolver
++    g_embedder_status_resolver = nullptr;
++
+ }  // namespace
+ 
++// static
++void MediaStreamDevicePermissionContext::SetEmbedderStatusResolver(
++    EmbedderStatusResolver resolver) {
++  g_embedder_status_resolver = resolver;
++}
++
+ MediaStreamDevicePermissionContext::MediaStreamDevicePermissionContext(
+     content::BrowserContext* browser_context,
+     const ContentSettingsType content_settings_type)
+@@ -115,6 +124,14 @@ MediaStreamDevicePermissionContext::GetContentSettingStatusInternal(
+       CHECK_EQ(POLICY_NOT_SET, policy, base::NotFatalUntil::M161);
+   }
+ 
++  if (g_embedder_status_resolver) {
++    if (std::optional<ContentSetting> setting = g_embedder_status_resolver(
++            browser_context(), content_settings_type_, requesting_origin,
++            embedding_origin)) {
++      return *setting;
++    }
++  }
++
+   // Check the content setting. TODO(raymes): currently mic/camera permission
+   // doesn't consider the embedder.
+   ContentSetting setting = permissions::ContentSettingPermissionContextBase::
+diff --git a/chrome/browser/media/webrtc/media_stream_device_permission_context.h b/chrome/browser/media/webrtc/media_stream_device_permission_context.h
+index b24017c10a..c49facb9c7 100644
+--- a/chrome/browser/media/webrtc/media_stream_device_permission_context.h
++++ b/chrome/browser/media/webrtc/media_stream_device_permission_context.h
+@@ -5,6 +5,8 @@
+ #ifndef CHROME_BROWSER_MEDIA_WEBRTC_MEDIA_STREAM_DEVICE_PERMISSION_CONTEXT_H_
+ #define CHROME_BROWSER_MEDIA_WEBRTC_MEDIA_STREAM_DEVICE_PERMISSION_CONTEXT_H_
+ 
++#include <optional>
++
+ #include "base/memory/weak_ptr.h"
+ #include "components/content_settings/core/common/content_settings.h"
+ #include "components/content_settings/core/common/content_settings_types.h"
+@@ -37,6 +39,16 @@ class MediaStreamDevicePermissionContext
+ 
+   ~MediaStreamDevicePermissionContext() override;
+ 
++  // Cobble: lets the embedder answer camera and microphone status from its own
++  // saved site decisions, including quiet checks, enumerateDevices and
++  // permissions.query. nullopt keeps Chromium's stored state.
++  using EmbedderStatusResolver = std::optional<ContentSetting> (*)(
++      content::BrowserContext* browser_context,
++      ContentSettingsType content_settings_type,
++      const GURL& requesting_origin,
++      const GURL& embedding_origin);
++  static void SetEmbedderStatusResolver(EmbedderStatusResolver resolver);
++
+   // PermissionContextBase:
+   void DecidePermission(
+       std::unique_ptr<permissions::PermissionRequestData> request_data,
