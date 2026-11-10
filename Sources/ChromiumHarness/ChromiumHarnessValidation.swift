@@ -828,708 +828,15 @@ enum HarnessValidation {
             checks["connectionRecoveredAfterError"] = !validationPage.securityErrorPage &&
                 !validationPage.securityCertificateError
 
-            runtime.onMediaPermissionRequest = nil
-            let unhandledMedia = configuration.phased(configuration.mediaPage, "unhandled")
-            try validationPage.load(unhandledMedia)
-            try await wait(for: validationPage, url: unhandledMedia,
-                           title: configuration.mediaDeniedTitle)
-            checks["unhandledMediaDenied"] = !validationPage.isCapturingMicrophone &&
-                !validationPage.isCapturingCamera
+            try await validateMediaPermissions(runtime: runtime, configuration: configuration,
+                validationPage: validationPage, openedContext: openedContext,
+                auxiliaryPages: &auxiliaryPages, reserveHost: reserveHost, closeHost: closeHost,
+                checks: &checks)
 
-            var allowedRequest: ChromiumMediaPermissionRequest?
-            runtime.onMediaPermissionRequest = { allowedRequest = $0 }
-            let allowedMedia = configuration.phased(configuration.mediaPage, "allowed")
-            try validationPage.load(allowedMedia)
-            try await waitForCondition("pending combined media request") {
-                allowedRequest?.isPending == true
-            }
-            checks["mediaPromptMoveRejected"] = moveIsRejectedWhilePending(validationPage)
-            checks["mediaPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
-                validationPage, reserveHost: reserveHost, closeHost: closeHost)
-            guard allowedRequest?.allow() == true else {
-                throw ValidationError("Native combined media permission request was not accepted.")
-            }
-            try await wait(for: validationPage, url: allowedMedia,
-                           title: configuration.mediaGrantedTitle)
-            guard let allowedRequest else {
-                throw ValidationError("Native combined media permission request was not delivered.")
-            }
-            checks["combinedMediaRequestMetadata"] = allowedRequest.page === validationPage &&
-                allowedRequest.kinds.contains(.microphone) && allowedRequest.kinds.contains(.camera) &&
-                allowedRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
-                allowedRequest.embeddingOrigin.absoluteString == configuration.secureOriginString &&
-                !allowedRequest.userGesture && allowedRequest.frameProcessID >= 0 &&
-                allowedRequest.frameRoutingID >= 0 && !allowedRequest.frameToken.isEmpty
-            checks["mediaAllowExactlyOnce"] = !allowedRequest.isPending && !allowedRequest.deny()
-            try await waitForCondition("native media capture state") {
-                validationPage.isCapturingMicrophone && validationPage.isCapturingCamera
-            }
-            checks["mediaCaptureStateReported"] = true
-            checks["mediaMoveAfterResolution"] = try await moveRoundTrips(validationPage)
-            guard validationPage.stopMediaCapture() else {
-                throw ValidationError("Native media capture stop was rejected.")
-            }
-            try await waitForCondition("native media capture stop") {
-                !validationPage.isCapturingMicrophone && !validationPage.isCapturingCamera
-            }
-            checks["mediaCaptureStopped"] = true
-
-            // Like Chrome's "Allow this time", that allow leaves a one-time grant:
-            // permissions.query reports granted and enumerateDevices exposes IDs and
-            // labels, which sites such as Zoom and Meet need to pick a device.
-            let mediaOrigin = configuration.secureOriginString
-            let mediaDevices = configuration.phased(configuration.mediaPage, "devices")
-            func mediaDevicesTitle(_ state: String, _ listed: Bool) -> String {
-                "Cobble Devices \(configuration.token) \(state) \(state) \(listed) \(listed)"
-            }
-            try validationPage.load(mediaDevices)
-            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("granted", true))
-            checks["mediaAllowExposesDevices"] = true
-            var exactRequests: [ChromiumMediaPermissionRequest] = []
-            runtime.onMediaPermissionRequest = { exactRequests.append($0); $0.allow() }
-            let exactMedia = configuration.phased(configuration.mediaPage, "exact")
-            try validationPage.load(exactMedia)
-            try await wait(for: validationPage, url: exactMedia,
-                           title: "Cobble Exact Granted \(configuration.token)")
-            checks["mediaExactDeviceGranted"] = exactRequests.count == 1 &&
-                exactRequests[0].kinds == [.camera, .microphone]
-            guard validationPage.stopMediaCapture() else {
-                throw ValidationError("Native media capture stop was rejected after the exact-device request.")
-            }
-            try await waitForCondition("exact-device media capture stop") {
-                !validationPage.isCapturingMicrophone && !validationPage.isCapturingCamera
-            }
-            runtime.onMediaPermissionRequest = nil
-            guard validationPage.context.resetPermission([.camera, .microphone], origin: mediaOrigin) else {
-                throw ValidationError("Native camera and microphone reset was rejected.")
-            }
-            try validationPage.load(mediaDevices)
-            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("prompt", false))
-            checks["mediaResetHidesDevices"] = true
-            // Saved host decisions answer the same quiet checks.
-            var mediaResolved: [(ChromiumMediaPermissionKinds, String, String)] = []
-            var mediaSaved = ChromiumPermissionSetting.allow
-            validationPage.context.permissionResolver = { kind, requesting, embedding in
-                mediaResolved.append((kind, requesting, embedding))
-                return kind == .windowManagement ? .ask : mediaSaved
-            }
-            try validationPage.load(mediaDevices)
-            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("granted", true))
-            mediaSaved = .deny
-            try validationPage.load(mediaDevices)
-            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("denied", false))
-            validationPage.context.permissionResolver = nil
-            checks["mediaSavedDecisionsAnswerQuietly"] = mediaResolved.contains { $0.0 == .camera } &&
-                mediaResolved.contains { $0.0 == .microphone } &&
-                mediaResolved.allSatisfy {
-                    ($0.0 == .camera || $0.0 == .microphone) && $0.1 == mediaOrigin && $0.2 == mediaOrigin
-                }
-            checks["mediaResetValidatesKind"] =
-                !validationPage.context.resetPermission([], origin: mediaOrigin) &&
-                !validationPage.context.resetPermission([.camera, .display], origin: mediaOrigin) &&
-                !validationPage.context.resetPermission(.camera, origin: mediaOrigin + "/path")
-
-            var navigatedRequest: ChromiumMediaPermissionRequest?
-            var navigationCancelled = false
-            runtime.onMediaPermissionRequest = { request in
-                navigatedRequest = request
-                request.onCancel = { navigationCancelled = true }
-            }
-            let navigatingMedia = configuration.phased(configuration.mediaPage, "navigate-away")
-            try validationPage.load(navigatingMedia)
-            try await waitForCondition("pending media request before navigation") {
-                navigatedRequest?.isPending == true
-            }
-            try validationPage.load(configuration.securePage)
-            try await wait(for: validationPage, url: configuration.securePage,
-                           title: configuration.secureTitle)
-            try await waitForCondition("media request cancellation after navigation") {
-                navigationCancelled && navigatedRequest?.isPending == false
-            }
-            checks["navigatedMediaRequestCancelled"] = navigatedRequest?.allow() == false
-
-            var closedRequest: ChromiumMediaPermissionRequest?
-            var closeCancelled = false
-            runtime.onMediaPermissionRequest = { request in
-                closedRequest = request
-                request.onCancel = { closeCancelled = true }
-            }
-            let closingMedia = configuration.phased(configuration.mediaPage, "close")
-            let mediaPage = try openedContext.makePage(url: closingMedia, hostWindowID: UUID())
-            auxiliaryPages.append(mediaPage)
-            try await waitForCondition("pending media request before close") {
-                closedRequest?.page === mediaPage && closedRequest?.isPending == true
-            }
-            mediaPage.forceClose()
-            guard await mediaPage.waitUntilClosed() else {
-                throw ValidationError("Media permission validation page did not close.")
-            }
-            try await waitForCondition("media request cancellation after close") {
-                closeCancelled && closedRequest?.isPending == false
-            }
-            checks["closedMediaRequestCancelled"] = closedRequest?.deny() == false
-
-            var reentrantRequest: ChromiumMediaPermissionRequest?
-            var reentrantCancellations = 0
-            runtime.onMediaPermissionRequest = { request in
-                reentrantRequest = request
-                request.onCancel = { reentrantCancellations += 1 }
-                request.page.forceClose()
-            }
-            let reentrantMedia = configuration.phased(configuration.mediaPage, "reentrant-close")
-            let reentrantMediaPage = try openedContext.makePage(
-                url: reentrantMedia, hostWindowID: UUID())
-            auxiliaryPages.append(reentrantMediaPage)
-            try await waitForCondition("reentrant media request delivery") {
-                reentrantRequest?.page === reentrantMediaPage &&
-                    (reentrantMediaPage.isClosing || reentrantMediaPage.isClosed)
-            }
-            guard await reentrantMediaPage.waitUntilClosed() else {
-                throw ValidationError("Reentrant media permission page did not close.")
-            }
-            try await waitForCondition("reentrant media request cancellation") {
-                reentrantCancellations == 1 && reentrantRequest?.isPending == false
-            }
-            checks["reentrantMediaCloseCancelledOnce"] = reentrantRequest?.allow() == false
-
-            // ABI 19 display capture. Fake devices skip the macOS picker and
-            // deliver Chromium's fake window/screen source for the chosen surface.
-            var displayRequest: ChromiumMediaPermissionRequest?
-            runtime.onMediaPermissionRequest = { displayRequest = $0 }
-            let displayMedia = configuration.phased(configuration.mediaPage, "display-window")
-            try validationPage.load(displayMedia)
-            try await waitForCondition("pending display request") {
-                displayRequest?.isPending == true
-            }
-            guard let displayRequest else {
-                throw ValidationError("Native display capture request was not delivered.")
-            }
-            checks["displayRequestMetadata"] = displayRequest.page === validationPage &&
-                displayRequest.kinds == .display &&
-                displayRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
-                displayRequest.embeddingOrigin.absoluteString == configuration.secureOriginString
-            checks["displayRequiresSurface"] = !displayRequest.allow() && displayRequest.isPending
-            guard displayRequest.allow(display: .window) else {
-                throw ValidationError("Native display capture request was not accepted.")
-            }
-            try await wait(for: validationPage, url: displayMedia,
-                           title: "\(configuration.displayGrantedTitle) window 0")
-            checks["displayWindowGranted"] = !displayRequest.isPending && !displayRequest.deny()
-            try await waitForCondition("native display capture state") {
-                validationPage.isCapturingDisplay && !validationPage.isCapturingCamera
-            }
-            checks["displayCaptureStateReported"] =
-                validationPage.isCapturingDisplay && !validationPage.isCapturingCamera
-            guard validationPage.stopDisplayCapture() else {
-                throw ValidationError("Native display capture stop was rejected.")
-            }
-            try await wait(for: validationPage, url: displayMedia,
-                           title: configuration.displayEndedTitle)
-            try await waitForCondition("native display capture stop") {
-                !validationPage.isCapturingDisplay
-            }
-            checks["displayCaptureStopped"] = !validationPage.stopDisplayCapture()
-            // Stop-all ends display streams too.
-            runtime.onMediaPermissionRequest = { $0.allow(display: .screen) }
-            let screenMedia = configuration.phased(configuration.mediaPage, "display-screen")
-            try validationPage.load(screenMedia)
-            try await wait(for: validationPage, url: screenMedia,
-                           title: "\(configuration.displayGrantedTitle) monitor 0")
-            try await waitForCondition("native screen capture state") {
-                validationPage.isCapturingDisplay
-            }
-            guard validationPage.stopMediaCapture() else {
-                throw ValidationError("Native stop-all did not cover display capture.")
-            }
-            try await wait(for: validationPage, url: screenMedia,
-                           title: configuration.displayEndedTitle)
-            try await waitForCondition("native stop-all display stop") {
-                !validationPage.isCapturingDisplay
-            }
-            checks["stopAllEndsDisplayCapture"] = !validationPage.stopMediaCapture()
-            runtime.onMediaPermissionRequest = { $0.deny() }
-            let deniedDisplay = configuration.phased(configuration.mediaPage, "display-denied")
-            try validationPage.load(deniedDisplay)
-            try await wait(for: validationPage, url: deniedDisplay,
-                           title: "\(configuration.displayDeniedTitle) NotAllowedError")
-            checks["displayDenied"] = !validationPage.isCapturingDisplay
-
-            // ABI 19 window management rides the media request path. Chromium
-            // keeps the grant for this session only; the host revokes it.
-            // Stock Chromium asks only with transient activation; smoke.mjs
-            // clicks through DevTools when asked (trusted-click.json).
-            let clickDirectory = configuration.beforeUnloadMarker.deletingLastPathComponent()
-            var trustedClicks = 0
-            func trustedClick(_ url: URL) async throws {
-                trustedClicks += 1
-                try await wait(for: validationPage, url: url, title: "Cobble Screens Pending \(configuration.token)")
-                try JSONEncoder().encode(["url": url.absoluteString, "id": String(trustedClicks)])
-                    .write(to: clickDirectory.appendingPathComponent("trusted-click.json"), options: .atomic)
-                let done = clickDirectory.appendingPathComponent("trusted-click-\(trustedClicks).done")
-                try await waitForCondition("trusted click \(trustedClicks)") {
-                    FileManager.default.fileExists(atPath: done.path)
-                }
-            }
-            var screensRequests: [ChromiumMediaPermissionRequest] = []
-            runtime.onMediaPermissionRequest = { screensRequests.append($0) }
-            let screens = configuration.phased(configuration.mediaPage, "screens-granted")
-            try validationPage.load(screens)
-            try await trustedClick(screens)
-            do {
-                try await waitForCondition("pending window management request") {
-                    screensRequests.first?.isPending == true
-                }
-            } catch {
-                throw ValidationError("Window management request was not delivered; page title: \(validationPage.title)")
-            }
-            let screensRequest = screensRequests[0]
-            checks["windowManagementRequestMetadata"] = screensRequest.page === validationPage &&
-                screensRequest.kinds == .windowManagement &&
-                screensRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
-                screensRequest.embeddingOrigin.absoluteString == configuration.secureOriginString
-            checks["windowManagementRejectsSurface"] =
-                !screensRequest.allow(display: .window) && screensRequest.isPending
-            guard screensRequest.allow() else {
-                throw ValidationError("Native window management request was not accepted.")
-            }
-            // Like Chrome's "Allow this time", the query still reports prompt.
-            try await wait(for: validationPage, url: screens,
-                           title: "\(configuration.screensGrantedTitle) true prompt")
-            let screensAgain = configuration.phased(configuration.mediaPage, "screens-again")
-            let origin = configuration.secureOriginString
-            // Saved host decisions answer quiet checks and permissions.query.
-            var resolved: [(ChromiumMediaPermissionKinds, String, String)] = []
-            var saved = ChromiumPermissionSetting.allow
-            validationPage.context.permissionResolver = { resolved.append(($0, $1, $2)); return saved }
-            try validationPage.load(screensAgain)
-            try await wait(for: validationPage, url: screensAgain,
-                           title: "\(configuration.screensGrantedTitle) true granted")
-            saved = .deny
-            try validationPage.load(screensAgain)
-            try await wait(for: validationPage, url: screensAgain,
-                           title: "\(configuration.screensDeniedTitle) NotAllowedError denied")
-            checks["windowManagementSavedDecisionsAnswerQuietly"] = screensRequests.count == 1 &&
-                !resolved.isEmpty && resolved.allSatisfy {
-                    $0.0 == .windowManagement && $0.1 == origin && $0.2 == origin
-                }
-            validationPage.context.permissionResolver = nil
-            checks["windowManagementResetValidatesKind"] =
-                !validationPage.context.resetPermission(.display, origin: origin) &&
-                !validationPage.context.resetPermission(.windowManagement, origin: origin + "/path")
-            guard validationPage.context.resetPermission(.windowManagement, origin: origin) else {
-                throw ValidationError("Native window management reset was rejected.")
-            }
-            runtime.onMediaPermissionRequest = { screensRequests.append($0); $0.deny() }
-            let screensDenied = configuration.phased(configuration.mediaPage, "screens-denied")
-            try validationPage.load(screensDenied)
-            try await trustedClick(screensDenied)
-            try await wait(for: validationPage, url: screensDenied,
-                           title: "\(configuration.screensDeniedTitle) NotAllowedError prompt")
-            checks["windowManagementResetAsksAgain"] = screensRequests.count == 2
-            // A denial stores no block in Chromium, so the host is asked again.
-            let screensDeniedAgain = configuration.phased(configuration.mediaPage, "screens-denied-again")
-            try validationPage.load(screensDeniedAgain)
-            try await trustedClick(screensDeniedAgain)
-            try await wait(for: validationPage, url: screensDeniedAgain,
-                           title: "\(configuration.screensDeniedTitle) NotAllowedError prompt")
-            checks["windowManagementDeniedStoresNothing"] = screensRequests.count == 3
-            runtime.onMediaPermissionRequest = nil
-
-            runtime.onJavaScriptDialog = nil
-            try validationPage.load(configuration.javascriptConfirm)
-            try await wait(for: validationPage, url: configuration.javascriptConfirm,
-                           title: configuration.javascriptDeniedTitle)
-            checks["unhandledJavaScriptDialogDenied"] = !validationPage.hasPendingPrompt
-
-            var promptRequest: ChromiumJavaScriptDialogRequest?
-            runtime.onJavaScriptDialog = { promptRequest = $0 }
-            try validationPage.load(configuration.javascriptPrompt)
-            try await waitForCondition("pending JavaScript prompt") {
-                promptRequest?.isPending == true && validationPage.hasPendingPrompt
-            }
-            guard let promptRequest else {
-                throw ValidationError("Native JavaScript prompt was not delivered.")
-            }
-            checks["javaScriptPromptMetadata"] = promptRequest.page === validationPage &&
-                promptRequest.kind == .prompt &&
-                promptRequest.message == "Cobble prompt \(configuration.token)" &&
-                promptRequest.defaultText == "fixture-default" &&
-                !promptRequest.requestingOrigin.isEmpty && !promptRequest.topLevelOrigin.isEmpty &&
-                promptRequest.frameProcessID >= 0 && promptRequest.frameRoutingID >= 0 &&
-                !promptRequest.frameToken.isEmpty && !promptRequest.isReload
-            checks["javaScriptPromptMoveRejected"] = moveIsRejectedWhilePending(validationPage)
-            checks["javaScriptPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
-                validationPage, reserveHost: reserveHost, closeHost: closeHost)
-            checks["javaScriptPromptExactlyOnce"] =
-                promptRequest.accept(promptText: configuration.token) && !promptRequest.cancel()
-            try await wait(for: validationPage, url: configuration.javascriptPrompt,
-                           title: configuration.javascriptAcceptedTitle)
-            checks["javaScriptMoveAfterResolution"] = try await moveRoundTrips(validationPage)
-
-            var staleDialog: ChromiumJavaScriptDialogRequest?
-            var staleDialogCancellations = 0
-            runtime.onJavaScriptDialog = { request in
-                staleDialog = request
-                request.onCancel = { staleDialogCancellations += 1 }
-            }
-            try validationPage.load(configuration.javascriptConfirm)
-            try await waitForCondition("pending JavaScript dialog before navigation") {
-                staleDialog?.isPending == true
-            }
-            try validationPage.load(configuration.domPage)
-            try await waitForCondition("JavaScript dialog navigation cancellation") {
-                staleDialogCancellations == 1 && staleDialog?.isPending == false
-            }
-            checks["javaScriptDialogNavigationCancelledOnce"] = staleDialog?.accept() == false
-
-            var beforeUnload: ChromiumJavaScriptDialogRequest?
-            stage("beforeunload-page", configuration)
-            runtime.onJavaScriptDialog = {
-                beforeUnload = $0
-                stage("beforeunload-callback-\($0.kind)", configuration)
-            }
-            try validationPage.load(configuration.beforeUnloadPage)
-            try await wait(for: validationPage, url: configuration.beforeUnloadPage,
-                           title: configuration.beforeUnloadReadyTitle)
-            try JSONEncoder().encode([
-                "url": configuration.beforeUnloadPage.absoluteString
-            ]).write(to: configuration.beforeUnloadMarker, options: .atomic)
-            try await waitForCondition("trusted beforeunload activation") {
-                FileManager.default.fileExists(atPath: configuration.beforeUnloadActivated.path)
-            }
-            stage("beforeunload-load-call", configuration)
-            try validationPage.load(configuration.beforeUnloadTarget)
-            stage("beforeunload-load-returned", configuration)
-            try await waitForCondition("cross-origin beforeunload prompt") {
-                beforeUnload?.isPending == true && validationPage.hasPendingPrompt
-            }
-            guard let beforeUnload else {
-                throw ValidationError("Cross-origin beforeunload request was not delivered.")
-            }
-            checks["crossOriginBeforeUnloadMetadata"] = beforeUnload.page === validationPage &&
-                beforeUnload.kind == .beforeUnload && !beforeUnload.isReload &&
-                !beforeUnload.requestingOrigin.isEmpty && !beforeUnload.topLevelOrigin.isEmpty
-            checks["crossOriginBeforeUnloadAccepted"] = beforeUnload.accept() && !beforeUnload.cancel()
-            try await wait(for: validationPage, url: configuration.beforeUnloadTarget,
-                           title: configuration.domTitle)
-            runtime.onJavaScriptDialog = nil
-
-            stage("http-auth", configuration)
-            var directAuthRequest: ChromiumHTTPAuthRequest?
-            runtime.onHTTPAuthRequest = { directAuthRequest = $0 }
-            let directAuthPage = try openedContext.makePage(
-                url: configuration.httpAuthDirect, hostWindowID: UUID())
-            auxiliaryPages.append(directAuthPage)
-            try await waitForCondition("fresh-page HTTP authentication request") {
-                directAuthRequest?.page === directAuthPage && directAuthRequest?.isPending == true
-            }
-            guard let directAuthRequest else {
-                throw ValidationError("Fresh-page HTTP authentication request was not delivered.")
-            }
-            checks["freshPageHTTPAuthMetadata"] =
-                directAuthRequest.requestURL == configuration.httpAuthDirect &&
-                directAuthRequest.primaryMainFrameNavigation && directAuthRequest.navigation &&
-                directAuthRequest.firstAttempt && !directAuthRequest.isProxy
-            checks["httpAuthPromptMoveRejected"] = moveIsRejectedWhilePending(directAuthPage)
-            checks["httpAuthPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
-                directAuthPage, reserveHost: reserveHost, closeHost: closeHost)
-            checks["freshPageHTTPAuthSubmit"] = directAuthRequest.submit(
-                username: "cobble", password: configuration.token)
-            try await wait(for: directAuthPage, url: configuration.httpAuthDirect,
-                           title: configuration.authGrantedTitle)
-            checks["httpAuthMoveAfterResolution"] = try await moveRoundTrips(directAuthPage)
-            directAuthPage.forceClose()
-            guard await directAuthPage.waitUntilClosed() else {
-                throw ValidationError("Fresh-page authentication fixture did not close.")
-            }
-
-            var authRequest: ChromiumHTTPAuthRequest?
-            runtime.onHTTPAuthRequest = { authRequest = $0 }
-            try validationPage.load(configuration.httpAuth)
-            try await waitForCondition("pending HTTP authentication request") {
-                authRequest?.isPending == true && validationPage.hasPendingPrompt
-            }
-            guard let authRequest else {
-                throw ValidationError("Native HTTP authentication request was not delivered.")
-            }
-            checks["httpAuthMetadata"] = authRequest.page === validationPage &&
-                authRequest.requestURL == configuration.httpAuth &&
-                authRequest.scheme.lowercased() == "basic" &&
-                authRequest.realm == "Cobble Fixture \(configuration.token)" &&
-                !authRequest.challengerOrigin.isEmpty && !authRequest.topLevelOrigin.isEmpty &&
-                !authRequest.isProxy && authRequest.firstAttempt &&
-                authRequest.primaryMainFrameNavigation && authRequest.navigation
-            checks["httpAuthSubmitExactlyOnce"] =
-                authRequest.submit(username: "cobble", password: configuration.token) &&
-                !authRequest.cancel()
-            try await wait(for: validationPage, url: configuration.httpAuth,
-                           title: configuration.authGrantedTitle)
-
-            var subresourceAuth: ChromiumHTTPAuthRequest?
-            runtime.onHTTPAuthRequest = { subresourceAuth = $0 }
-            try validationPage.load(configuration.httpAuthSubresourcePage)
-            try await waitForCondition("subresource HTTP authentication request") {
-                subresourceAuth?.isPending == true
-            }
-            guard let subresourceAuth else {
-                throw ValidationError("Subresource HTTP authentication request was not delivered.")
-            }
-            checks["subresourceHTTPAuthMetadata"] =
-                subresourceAuth.requestURL?.host == "cobble-auth-subresource.test" &&
-                !subresourceAuth.primaryMainFrameNavigation && !subresourceAuth.navigation &&
-                subresourceAuth.topLevelOrigin.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ==
-                    configuration.origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            checks["subresourceHTTPAuthSubmit"] = subresourceAuth.submit(
-                username: "cobble", password: configuration.token)
-            try await wait(for: validationPage, url: configuration.httpAuthSubresourcePage,
-                           title: configuration.authSubresourceGrantedTitle)
-
-            var cancelledAuth: ChromiumHTTPAuthRequest?
-            var authCancellations = 0
-            runtime.onHTTPAuthRequest = { request in
-                cancelledAuth = request
-                request.onCancel = { authCancellations += 1 }
-            }
-            try validationPage.load(configuration.httpAuthCancellation)
-            try await waitForCondition("pending HTTP authentication before navigation") {
-                cancelledAuth?.isPending == true
-            }
-            try validationPage.load(configuration.domPage)
-            try await waitForCondition("HTTP authentication navigation cancellation") {
-                authCancellations == 1 && cancelledAuth?.isPending == false
-            }
-            checks["httpAuthNavigationCancelledOnce"] = cancelledAuth?.cancel() == false
-            runtime.onHTTPAuthRequest = nil
-
-            stage("file-chooser", configuration)
-            let selectedFile = configuration.userDataDirectory
-                .appendingPathComponent("chooser-\(configuration.token).txt")
-            try Data("selected \(configuration.token)".utf8).write(to: selectedFile)
-            var chooserRequest: ChromiumFileChooserRequest?
-            runtime.onFileChooserRequest = { chooserRequest = $0 }
-            try validationPage.load(configuration.fileChooser)
-            try await wait(for: validationPage, url: configuration.fileChooser,
-                           title: configuration.filePendingTitle)
-            try JSONSerialization.data(withJSONObject: [
-                "url": configuration.fileChooser.absoluteString,
-                "sequence": 1,
-                "removeFrame": false,
-            ]).write(to: configuration.fileChooserMarker, options: .atomic)
-            try await waitForCondition("pending file chooser") {
-                chooserRequest?.isPending == true && validationPage.hasPendingPrompt
-            }
-            guard let chooserRequest else {
-                throw ValidationError("Native file chooser request was not delivered.")
-            }
-            checks["fileChooserMetadata"] = chooserRequest.page === validationPage &&
-                chooserRequest.mode == .open && !chooserRequest.requestingOrigin.isEmpty &&
-                !chooserRequest.topLevelOrigin.isEmpty && chooserRequest.frameProcessID >= 0 &&
-                chooserRequest.frameRoutingID >= 0 && !chooserRequest.frameToken.isEmpty &&
-                chooserRequest.acceptedTypes.contains("text/plain")
-            checks["fileChooserPromptMoveRejected"] = moveIsRejectedWhilePending(validationPage)
-            checks["fileChooserPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
-                validationPage, reserveHost: reserveHost, closeHost: closeHost)
-            checks["fileChooserSelectExactlyOnce"] =
-                chooserRequest.select([selectedFile]) && !chooserRequest.cancel()
-            try await wait(for: validationPage, url: configuration.fileChooser,
-                           title: configuration.fileSelectedTitle)
-            checks["fileChooserMoveAfterResolution"] = try await moveRoundTrips(validationPage)
-
-            var frameChooser: ChromiumFileChooserRequest?
-            var frameChooserCancellations = 0
-            runtime.onFileChooserRequest = { request in
-                frameChooser = request
-                request.onCancel = { frameChooserCancellations += 1 }
-            }
-            try validationPage.load(configuration.fileFrameParent)
-            try await wait(for: validationPage, url: configuration.fileFrameParent,
-                           title: configuration.fileFrameTitle)
-            try JSONSerialization.data(withJSONObject: [
-                "url": configuration.fileFrameParent.absoluteString,
-                "sequence": 2,
-                "removeFrame": true,
-            ]).write(to: configuration.fileChooserMarker, options: .atomic)
-            try await waitForCondition("iframe file chooser request") {
-                frameChooser?.isPending == true
-            }
-            try await waitForCondition("removed iframe file chooser cancellation") {
-                frameChooserCancellations == 1 && frameChooser?.isPending == false
-            }
-            checks["removedFrameFileChooserCancelledOnce"] = frameChooser?.cancel() == false &&
-                !validationPage.hasPendingPrompt
-
-            var crashChooser: ChromiumFileChooserRequest?
-            var crashChooserCancellations = 0
-            runtime.onFileChooserRequest = { request in
-                crashChooser = request
-                request.onCancel = { crashChooserCancellations += 1 }
-            }
-            let crashPage = try openedContext.makePage(
-                url: configuration.crashFileChooser, hostWindowID: UUID())
-            auxiliaryPages.append(crashPage)
-            try await wait(for: crashPage, url: configuration.crashFileChooser,
-                           title: configuration.filePendingTitle)
-            let targetCrashToolsHost = reserveHost()
-            let targetCrashTools = try crashPage.openDevTools(hostWindowID: targetCrashToolsHost)
-            var targetCrashToolsCloseCount = 0
-            targetCrashTools.onClose = { targetCrashToolsCloseCount += 1 }
-            guard showDevTools(targetCrashTools, targetCrashToolsHost) else {
-                throw ValidationError("Target-crash DevTools frontend did not attach.")
-            }
-            try JSONSerialization.data(withJSONObject: [
-                "url": configuration.crashFileChooser.absoluteString,
-                "sequence": 3,
-                "removeFrame": false,
-            ]).write(to: configuration.fileChooserMarker, options: .atomic)
-            try await waitForCondition("file chooser before renderer crash") {
-                crashChooser?.page === crashPage && crashChooser?.isPending == true
-            }
-            try JSONEncoder().encode([
-                "url": configuration.crashFileChooser.absoluteString
-            ]).write(to: configuration.promptCrashMarker, options: .atomic)
-            try await waitForCondition("renderer crash prompt cancellation") {
-                crashPage.isCrashed && crashChooserCancellations == 1 &&
-                    crashChooser?.isPending == false
-            }
-            try await waitForCondition("inspected target crash closes DevTools") {
-                targetCrashTools.isClosed && targetCrashToolsCloseCount == 1
-            }
-            checks["rendererTerminationReasonAvailable"] =
-                crashPage.rendererTerminationStatus != nil && !crashPage.isDocumentReady &&
-                !crashPage.isUnresponsive
-            checks["rendererCrashFileChooserCancelledOnce"] =
-                crashChooser?.select([selectedFile]) == false
-            checks["devToolsTargetCrashClosesOnce"] = targetCrashTools.isClosed &&
-                !targetCrashTools.close() && targetCrashToolsCloseCount == 1
-            closeHost?(targetCrashToolsHost)
-            checks["crashedConnectionDetailsUnavailable"] =
-                try await crashPage.connectionDetails() == nil
-            crashPage.forceClose()
-            guard await crashPage.waitUntilClosed() else {
-                throw ValidationError("Renderer crash prompt fixture did not close.")
-            }
-            let selectedFolder = configuration.userDataDirectory
-                .appendingPathComponent("chooser-folder-\(configuration.token)", isDirectory: true)
-            let nestedFolder = selectedFolder.appendingPathComponent("nested", isDirectory: true)
-            try FileManager.default.createDirectory(at: nestedFolder,
-                                                    withIntermediateDirectories: true)
-            try Data("top \(configuration.token)".utf8)
-                .write(to: selectedFolder.appendingPathComponent("a.txt"))
-            try Data("nested \(configuration.token)".utf8)
-                .write(to: nestedFolder.appendingPathComponent("b.txt"))
-            var folderChooserRequest: ChromiumFileChooserRequest?
-            runtime.onFileChooserRequest = { folderChooserRequest = $0 }
-            try validationPage.load(configuration.fileFolder)
-            try await wait(for: validationPage, url: configuration.fileFolder,
-                           title: configuration.folderPendingTitle)
-            try JSONSerialization.data(withJSONObject: [
-                "url": configuration.fileFolder.absoluteString,
-                "sequence": 4,
-                "removeFrame": false,
-            ]).write(to: configuration.fileChooserMarker, options: .atomic)
-            try await waitForCondition("pending folder upload chooser") {
-                folderChooserRequest?.isPending == true
-            }
-            guard let folderRequest = folderChooserRequest, folderRequest.mode == .uploadFolder,
-                  folderRequest.select([selectedFolder]) else {
-                throw ValidationError("Native folder upload selection was rejected.")
-            }
-            try await wait(for: validationPage, url: configuration.fileFolder,
-                           title: configuration.folderSelectedTitle)
-            checks["folderUploadEnumeratesNestedRelativePaths"] = true
-
-            stage("exclusive-access", configuration)
-            try validationPage.load(configuration.exclusiveAccess)
-            try await wait(for: validationPage, url: configuration.exclusiveAccess,
-                           title: configuration.exclusiveReadyTitle)
-            // Chromium 157 refuses page fullscreen unless the page view has
-            // focus in the key window, as after a real click.
-            NSApp.activate(ignoringOtherApps: true)
-            validationPage.nativeView.window?.makeKeyAndOrderFront(nil)
-            validationPage.focus()
-            try? await waitForCondition("exclusive page key window") {
-                validationPage.nativeView.window?.isKeyWindow == true
-            }
-            FileHandle.standardError.write(Data(
-                "exclusive focus key=\(validationPage.nativeView.window?.isKeyWindow ?? false)\n".utf8))
-            let exclusiveWindowIDs = Set(NSApp.windows.map(ObjectIdentifier.init))
-            try JSONSerialization.data(withJSONObject: [
-                "url": configuration.exclusiveAccess.absoluteString,
-            ]).write(to: configuration.exclusiveAccessMarker, options: .atomic)
-            for capability in ["pip", "documentPip", "displayMedia", "bluetooth",
-                               "usb", "serial", "hid", "payment"] {
-                try await waitForCondition("exclusive \(capability) result") {
-                    guard let data = try? Data(contentsOf: configuration.exclusiveAccessOutcome),
-                          let value = try? JSONSerialization.jsonObject(with: data)
-                            as? [String: Any],
-                          let outcomes = value["containment"] as? [String: Any]
-                    else { return false }
-                    return outcomes[capability] != nil
-                }
-            }
-            try await wait(for: validationPage, url: configuration.exclusiveAccess,
-                           title: configuration.exclusiveDeniedTitle, timeout: .seconds(32))
-            let exclusiveDOM = try await validationPage.currentDOM()
-            let capabilityOutcomes = ["fullscreen-outcome", "fullscreen-entered-and-exited",
-                                      "bluetooth", "usb", "serial", "hid", "payment"].map {
-                "\($0)=\(attribute(named: $0, in: exclusiveDOM) ?? "missing")"
-            }.joined(separator: " ")
-            FileHandle.standardError.write(Data("exclusive capabilities \(capabilityOutcomes)\n".utf8))
-            checks["exclusivePageVisible"] = validationPage.nativeView.window != nil &&
-                exclusiveDOM.contains("data-visibility=\"visible\"") &&
-                exclusiveDOM.contains("data-focused=\"true\"") &&
-                exclusiveDOM.contains("data-viewport=\"true\"") &&
-                exclusiveDOM.contains("data-fullscreen-enabled=\"true\"")
-            checks["fullscreenEnteredAndExited"] =
-                exclusiveDOM.contains("data-fullscreen-entered-and-exited=\"true\"")
-            checks["pointerLockDenied"] = exclusiveDOM.contains("data-pointer-denied=\"true\"")
-            checks["keyboardLockDeniedWithoutKeyCapture"] =
-                exclusiveDOM.contains("data-keyboard-denied=\"true\"") &&
-                exclusiveDOM.contains("data-key-delivered=\"true\"")
-            checks["deviceAndPaymentRequestsSettleDenied"] =
-                ["bluetooth", "usb", "serial", "hid", "payment"].allSatisfy {
-                    exclusiveDOM.contains("data-\($0)=\"rejected\"") ||
-                        exclusiveDOM.contains("data-\($0)=\"empty\"") ||
-                        exclusiveDOM.contains("data-\($0)=\"unavailable\"")
-                }
-            // The page's own fullscreen Space (fullscreen runs first) must close
-            // after exit. Its AppKit Space machinery (NS* windows) is not an
-            // escape; any other new visible window, such as a Views PiP, is.
-            let ownedFullscreen = { (window: NSWindow) in
-                NSStringFromClass(type(of: window)) == "CobbleContentFullscreenWindow"
-            }
-            try? await waitForCondition("page fullscreen window closed") {
-                !NSApp.windows.contains { ownedFullscreen($0) && $0.isVisible }
-            }
-            checks["fullscreenWindowClosedAfterExit"] =
-                !NSApp.windows.contains { ownedFullscreen($0) && $0.isVisible }
-            let escapedWindows = NSApp.windows.filter {
-                let name = NSStringFromClass(type(of: $0))
-                return $0.isVisible && !exclusiveWindowIDs.contains(ObjectIdentifier($0)) &&
-                    !ownedFullscreen($0) && !name.hasPrefix("NS") && !name.hasPrefix("_NS")
-            }
-            let noCapabilityWindowEscaped = escapedWindows.isEmpty
-            if !escapedWindows.isEmpty {
-                let names = escapedWindows.map { NSStringFromClass(type(of: $0)) }
-                FileHandle.standardError.write(Data("exclusive escaped windows \(names)\n".utf8))
-            }
-            checks["pictureInPictureDeniedNoWindow"] =
-                exclusiveDOM.contains("data-pip=\"rejected\"") &&
-                exclusiveDOM.contains("data-pip-activation=\"true\"") &&
-                exclusiveDOM.contains("data-pip-video-ready=\"true\"") &&
-                noCapabilityWindowEscaped
-            checks["documentPictureInPictureDeniedNoWindow"] =
-                (exclusiveDOM.contains("data-document-pip=\"rejected\"") ||
-                    exclusiveDOM.contains("data-document-pip=\"unavailable\"")) &&
-                (exclusiveDOM.contains("data-document-pip=\"unavailable\"") ||
-                    exclusiveDOM.contains("data-document-pip-activation=\"true\"")) &&
-                noCapabilityWindowEscaped
-            checks["displayMediaDeniedNoPicker"] =
-                exclusiveDOM.contains("data-display-media=\"rejected\"") &&
-                exclusiveDOM.contains("data-display-media-activation=\"true\"") &&
-                noCapabilityWindowEscaped
-
-            runtime.onFileChooserRequest = nil
+            try await validatePrompts(runtime: runtime, configuration: configuration,
+                validationPage: validationPage, openedContext: openedContext,
+                auxiliaryPages: &auxiliaryPages, reserveHost: reserveHost, showDevTools: showDevTools,
+                closeHost: closeHost, checks: &checks)
 
             stage("external-protocol", configuration)
             runtime.onExternalProtocolRequest = nil
@@ -2241,6 +1548,677 @@ enum HarnessValidation {
                           extensionID: extensionID, extensionDirectory: extensionDirectory,
                           blockingExtensionID: blockingExtensionID, blockingDirectory: blockingDirectory)
         }
+    }
+
+    /// Camera, microphone, display capture and window-management requests. Kept out of
+    /// `run`, whose single async body otherwise needs more memory than CI runners have.
+    private static func validateMediaPermissions(runtime: ChromiumRuntime, configuration: Configuration,
+                                                 validationPage: ChromiumPage, openedContext: ChromiumContext,
+                                                 auxiliaryPages: inout [ChromiumPage],
+                                                 reserveHost: (() -> UUID)?, closeHost: ((UUID) -> Void)?,
+                                                 checks: inout [String: Bool]) async throws {
+        runtime.onMediaPermissionRequest = nil
+        let unhandledMedia = configuration.phased(configuration.mediaPage, "unhandled")
+        try validationPage.load(unhandledMedia)
+        try await wait(for: validationPage, url: unhandledMedia,
+                       title: configuration.mediaDeniedTitle)
+        checks["unhandledMediaDenied"] = !validationPage.isCapturingMicrophone &&
+            !validationPage.isCapturingCamera
+
+        var allowedRequest: ChromiumMediaPermissionRequest?
+        runtime.onMediaPermissionRequest = { allowedRequest = $0 }
+        let allowedMedia = configuration.phased(configuration.mediaPage, "allowed")
+        try validationPage.load(allowedMedia)
+        try await waitForCondition("pending combined media request") {
+            allowedRequest?.isPending == true
+        }
+        checks["mediaPromptMoveRejected"] = moveIsRejectedWhilePending(validationPage)
+        checks["mediaPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
+            validationPage, reserveHost: reserveHost, closeHost: closeHost)
+        guard allowedRequest?.allow() == true else {
+            throw ValidationError("Native combined media permission request was not accepted.")
+        }
+        try await wait(for: validationPage, url: allowedMedia,
+                       title: configuration.mediaGrantedTitle)
+        guard let allowedRequest else {
+            throw ValidationError("Native combined media permission request was not delivered.")
+        }
+        checks["combinedMediaRequestMetadata"] = allowedRequest.page === validationPage &&
+            allowedRequest.kinds.contains(.microphone) && allowedRequest.kinds.contains(.camera) &&
+            allowedRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
+            allowedRequest.embeddingOrigin.absoluteString == configuration.secureOriginString &&
+            !allowedRequest.userGesture && allowedRequest.frameProcessID >= 0 &&
+            allowedRequest.frameRoutingID >= 0 && !allowedRequest.frameToken.isEmpty
+        checks["mediaAllowExactlyOnce"] = !allowedRequest.isPending && !allowedRequest.deny()
+        try await waitForCondition("native media capture state") {
+            validationPage.isCapturingMicrophone && validationPage.isCapturingCamera
+        }
+        checks["mediaCaptureStateReported"] = true
+        checks["mediaMoveAfterResolution"] = try await moveRoundTrips(validationPage)
+        guard validationPage.stopMediaCapture() else {
+            throw ValidationError("Native media capture stop was rejected.")
+        }
+        try await waitForCondition("native media capture stop") {
+            !validationPage.isCapturingMicrophone && !validationPage.isCapturingCamera
+        }
+        checks["mediaCaptureStopped"] = true
+
+        checks.merge(try await HarnessMediaDeviceValidation.run(runtime: runtime, page: validationPage,
+            token: configuration.token, origin: configuration.secureOriginString,
+            devices: configuration.phased(configuration.mediaPage, "devices"),
+            exact: configuration.phased(configuration.mediaPage, "exact"))) { _, new in new }
+
+        var navigatedRequest: ChromiumMediaPermissionRequest?
+        var navigationCancelled = false
+        runtime.onMediaPermissionRequest = { request in
+            navigatedRequest = request
+            request.onCancel = { navigationCancelled = true }
+        }
+        let navigatingMedia = configuration.phased(configuration.mediaPage, "navigate-away")
+        try validationPage.load(navigatingMedia)
+        try await waitForCondition("pending media request before navigation") {
+            navigatedRequest?.isPending == true
+        }
+        try validationPage.load(configuration.securePage)
+        try await wait(for: validationPage, url: configuration.securePage,
+                       title: configuration.secureTitle)
+        try await waitForCondition("media request cancellation after navigation") {
+            navigationCancelled && navigatedRequest?.isPending == false
+        }
+        checks["navigatedMediaRequestCancelled"] = navigatedRequest?.allow() == false
+
+        var closedRequest: ChromiumMediaPermissionRequest?
+        var closeCancelled = false
+        runtime.onMediaPermissionRequest = { request in
+            closedRequest = request
+            request.onCancel = { closeCancelled = true }
+        }
+        let closingMedia = configuration.phased(configuration.mediaPage, "close")
+        let mediaPage = try openedContext.makePage(url: closingMedia, hostWindowID: UUID())
+        auxiliaryPages.append(mediaPage)
+        try await waitForCondition("pending media request before close") {
+            closedRequest?.page === mediaPage && closedRequest?.isPending == true
+        }
+        mediaPage.forceClose()
+        guard await mediaPage.waitUntilClosed() else {
+            throw ValidationError("Media permission validation page did not close.")
+        }
+        try await waitForCondition("media request cancellation after close") {
+            closeCancelled && closedRequest?.isPending == false
+        }
+        checks["closedMediaRequestCancelled"] = closedRequest?.deny() == false
+
+        var reentrantRequest: ChromiumMediaPermissionRequest?
+        var reentrantCancellations = 0
+        runtime.onMediaPermissionRequest = { request in
+            reentrantRequest = request
+            request.onCancel = { reentrantCancellations += 1 }
+            request.page.forceClose()
+        }
+        let reentrantMedia = configuration.phased(configuration.mediaPage, "reentrant-close")
+        let reentrantMediaPage = try openedContext.makePage(
+            url: reentrantMedia, hostWindowID: UUID())
+        auxiliaryPages.append(reentrantMediaPage)
+        try await waitForCondition("reentrant media request delivery") {
+            reentrantRequest?.page === reentrantMediaPage &&
+                (reentrantMediaPage.isClosing || reentrantMediaPage.isClosed)
+        }
+        guard await reentrantMediaPage.waitUntilClosed() else {
+            throw ValidationError("Reentrant media permission page did not close.")
+        }
+        try await waitForCondition("reentrant media request cancellation") {
+            reentrantCancellations == 1 && reentrantRequest?.isPending == false
+        }
+        checks["reentrantMediaCloseCancelledOnce"] = reentrantRequest?.allow() == false
+
+        // ABI 19 display capture. Fake devices skip the macOS picker and
+        // deliver Chromium's fake window/screen source for the chosen surface.
+        var displayRequest: ChromiumMediaPermissionRequest?
+        runtime.onMediaPermissionRequest = { displayRequest = $0 }
+        let displayMedia = configuration.phased(configuration.mediaPage, "display-window")
+        try validationPage.load(displayMedia)
+        try await waitForCondition("pending display request") {
+            displayRequest?.isPending == true
+        }
+        guard let displayRequest else {
+            throw ValidationError("Native display capture request was not delivered.")
+        }
+        checks["displayRequestMetadata"] = displayRequest.page === validationPage &&
+            displayRequest.kinds == .display &&
+            displayRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
+            displayRequest.embeddingOrigin.absoluteString == configuration.secureOriginString
+        checks["displayRequiresSurface"] = !displayRequest.allow() && displayRequest.isPending
+        guard displayRequest.allow(display: .window) else {
+            throw ValidationError("Native display capture request was not accepted.")
+        }
+        try await wait(for: validationPage, url: displayMedia,
+                       title: "\(configuration.displayGrantedTitle) window 0")
+        checks["displayWindowGranted"] = !displayRequest.isPending && !displayRequest.deny()
+        try await waitForCondition("native display capture state") {
+            validationPage.isCapturingDisplay && !validationPage.isCapturingCamera
+        }
+        checks["displayCaptureStateReported"] =
+            validationPage.isCapturingDisplay && !validationPage.isCapturingCamera
+        guard validationPage.stopDisplayCapture() else {
+            throw ValidationError("Native display capture stop was rejected.")
+        }
+        try await wait(for: validationPage, url: displayMedia,
+                       title: configuration.displayEndedTitle)
+        try await waitForCondition("native display capture stop") {
+            !validationPage.isCapturingDisplay
+        }
+        checks["displayCaptureStopped"] = !validationPage.stopDisplayCapture()
+        // Stop-all ends display streams too.
+        runtime.onMediaPermissionRequest = { $0.allow(display: .screen) }
+        let screenMedia = configuration.phased(configuration.mediaPage, "display-screen")
+        try validationPage.load(screenMedia)
+        try await wait(for: validationPage, url: screenMedia,
+                       title: "\(configuration.displayGrantedTitle) monitor 0")
+        try await waitForCondition("native screen capture state") {
+            validationPage.isCapturingDisplay
+        }
+        guard validationPage.stopMediaCapture() else {
+            throw ValidationError("Native stop-all did not cover display capture.")
+        }
+        try await wait(for: validationPage, url: screenMedia,
+                       title: configuration.displayEndedTitle)
+        try await waitForCondition("native stop-all display stop") {
+            !validationPage.isCapturingDisplay
+        }
+        checks["stopAllEndsDisplayCapture"] = !validationPage.stopMediaCapture()
+        runtime.onMediaPermissionRequest = { $0.deny() }
+        let deniedDisplay = configuration.phased(configuration.mediaPage, "display-denied")
+        try validationPage.load(deniedDisplay)
+        try await wait(for: validationPage, url: deniedDisplay,
+                       title: "\(configuration.displayDeniedTitle) NotAllowedError")
+        checks["displayDenied"] = !validationPage.isCapturingDisplay
+
+        // ABI 19 window management rides the media request path. Chromium
+        // keeps the grant for this session only; the host revokes it.
+        // Stock Chromium asks only with transient activation; smoke.mjs
+        // clicks through DevTools when asked (trusted-click.json).
+        let clickDirectory = configuration.beforeUnloadMarker.deletingLastPathComponent()
+        var trustedClicks = 0
+        func trustedClick(_ url: URL) async throws {
+            trustedClicks += 1
+            try await wait(for: validationPage, url: url, title: "Cobble Screens Pending \(configuration.token)")
+            try JSONEncoder().encode(["url": url.absoluteString, "id": String(trustedClicks)])
+                .write(to: clickDirectory.appendingPathComponent("trusted-click.json"), options: .atomic)
+            let done = clickDirectory.appendingPathComponent("trusted-click-\(trustedClicks).done")
+            try await waitForCondition("trusted click \(trustedClicks)") {
+                FileManager.default.fileExists(atPath: done.path)
+            }
+        }
+        var screensRequests: [ChromiumMediaPermissionRequest] = []
+        runtime.onMediaPermissionRequest = { screensRequests.append($0) }
+        let screens = configuration.phased(configuration.mediaPage, "screens-granted")
+        try validationPage.load(screens)
+        try await trustedClick(screens)
+        do {
+            try await waitForCondition("pending window management request") {
+                screensRequests.first?.isPending == true
+            }
+        } catch {
+            throw ValidationError("Window management request was not delivered; page title: \(validationPage.title)")
+        }
+        let screensRequest = screensRequests[0]
+        checks["windowManagementRequestMetadata"] = screensRequest.page === validationPage &&
+            screensRequest.kinds == .windowManagement &&
+            screensRequest.requestingOrigin.absoluteString == configuration.secureOriginString &&
+            screensRequest.embeddingOrigin.absoluteString == configuration.secureOriginString
+        checks["windowManagementRejectsSurface"] =
+            !screensRequest.allow(display: .window) && screensRequest.isPending
+        guard screensRequest.allow() else {
+            throw ValidationError("Native window management request was not accepted.")
+        }
+        // Like Chrome's "Allow this time", the query still reports prompt.
+        try await wait(for: validationPage, url: screens,
+                       title: "\(configuration.screensGrantedTitle) true prompt")
+        let screensAgain = configuration.phased(configuration.mediaPage, "screens-again")
+        let origin = configuration.secureOriginString
+        // Saved host decisions answer quiet checks and permissions.query.
+        var resolved: [(ChromiumMediaPermissionKinds, String, String)] = []
+        var saved = ChromiumPermissionSetting.allow
+        validationPage.context.permissionResolver = { resolved.append(($0, $1, $2)); return saved }
+        try validationPage.load(screensAgain)
+        try await wait(for: validationPage, url: screensAgain,
+                       title: "\(configuration.screensGrantedTitle) true granted")
+        saved = .deny
+        try validationPage.load(screensAgain)
+        try await wait(for: validationPage, url: screensAgain,
+                       title: "\(configuration.screensDeniedTitle) NotAllowedError denied")
+        checks["windowManagementSavedDecisionsAnswerQuietly"] = screensRequests.count == 1 &&
+            !resolved.isEmpty && resolved.allSatisfy {
+                $0.0 == .windowManagement && $0.1 == origin && $0.2 == origin
+            }
+        validationPage.context.permissionResolver = nil
+        checks["windowManagementResetValidatesKind"] =
+            !validationPage.context.resetPermission(.display, origin: origin) &&
+            !validationPage.context.resetPermission(.windowManagement, origin: origin + "/path")
+        guard validationPage.context.resetPermission(.windowManagement, origin: origin) else {
+            throw ValidationError("Native window management reset was rejected.")
+        }
+        runtime.onMediaPermissionRequest = { screensRequests.append($0); $0.deny() }
+        let screensDenied = configuration.phased(configuration.mediaPage, "screens-denied")
+        try validationPage.load(screensDenied)
+        try await trustedClick(screensDenied)
+        try await wait(for: validationPage, url: screensDenied,
+                       title: "\(configuration.screensDeniedTitle) NotAllowedError prompt")
+        checks["windowManagementResetAsksAgain"] = screensRequests.count == 2
+        // A denial stores no block in Chromium, so the host is asked again.
+        let screensDeniedAgain = configuration.phased(configuration.mediaPage, "screens-denied-again")
+        try validationPage.load(screensDeniedAgain)
+        try await trustedClick(screensDeniedAgain)
+        try await wait(for: validationPage, url: screensDeniedAgain,
+                       title: "\(configuration.screensDeniedTitle) NotAllowedError prompt")
+        checks["windowManagementDeniedStoresNothing"] = screensRequests.count == 3
+        runtime.onMediaPermissionRequest = nil
+    }
+
+    /// JavaScript dialogs, before-unload, HTTP auth, file choosers and exclusive access.
+    /// Kept out of `run` for the same compile-memory reason as `validateMediaPermissions`.
+    private static func validatePrompts(runtime: ChromiumRuntime, configuration: Configuration,
+                                        validationPage: ChromiumPage, openedContext: ChromiumContext,
+                                        auxiliaryPages: inout [ChromiumPage],
+                                        reserveHost: @escaping () -> UUID,
+                                        showDevTools: @escaping (ChromiumDevToolsSession, UUID) -> Bool,
+                                        closeHost: ((UUID) -> Void)?,
+                                        checks: inout [String: Bool]) async throws {
+        runtime.onJavaScriptDialog = nil
+        try validationPage.load(configuration.javascriptConfirm)
+        try await wait(for: validationPage, url: configuration.javascriptConfirm,
+                       title: configuration.javascriptDeniedTitle)
+        checks["unhandledJavaScriptDialogDenied"] = !validationPage.hasPendingPrompt
+
+        var promptRequest: ChromiumJavaScriptDialogRequest?
+        runtime.onJavaScriptDialog = { promptRequest = $0 }
+        try validationPage.load(configuration.javascriptPrompt)
+        try await waitForCondition("pending JavaScript prompt") {
+            promptRequest?.isPending == true && validationPage.hasPendingPrompt
+        }
+        guard let promptRequest else {
+            throw ValidationError("Native JavaScript prompt was not delivered.")
+        }
+        checks["javaScriptPromptMetadata"] = promptRequest.page === validationPage &&
+            promptRequest.kind == .prompt &&
+            promptRequest.message == "Cobble prompt \(configuration.token)" &&
+            promptRequest.defaultText == "fixture-default" &&
+            !promptRequest.requestingOrigin.isEmpty && !promptRequest.topLevelOrigin.isEmpty &&
+            promptRequest.frameProcessID >= 0 && promptRequest.frameRoutingID >= 0 &&
+            !promptRequest.frameToken.isEmpty && !promptRequest.isReload
+        checks["javaScriptPromptMoveRejected"] = moveIsRejectedWhilePending(validationPage)
+        checks["javaScriptPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
+            validationPage, reserveHost: reserveHost, closeHost: closeHost)
+        checks["javaScriptPromptExactlyOnce"] =
+            promptRequest.accept(promptText: configuration.token) && !promptRequest.cancel()
+        try await wait(for: validationPage, url: configuration.javascriptPrompt,
+                       title: configuration.javascriptAcceptedTitle)
+        checks["javaScriptMoveAfterResolution"] = try await moveRoundTrips(validationPage)
+
+        var staleDialog: ChromiumJavaScriptDialogRequest?
+        var staleDialogCancellations = 0
+        runtime.onJavaScriptDialog = { request in
+            staleDialog = request
+            request.onCancel = { staleDialogCancellations += 1 }
+        }
+        try validationPage.load(configuration.javascriptConfirm)
+        try await waitForCondition("pending JavaScript dialog before navigation") {
+            staleDialog?.isPending == true
+        }
+        try validationPage.load(configuration.domPage)
+        try await waitForCondition("JavaScript dialog navigation cancellation") {
+            staleDialogCancellations == 1 && staleDialog?.isPending == false
+        }
+        checks["javaScriptDialogNavigationCancelledOnce"] = staleDialog?.accept() == false
+
+        var beforeUnload: ChromiumJavaScriptDialogRequest?
+        stage("beforeunload-page", configuration)
+        runtime.onJavaScriptDialog = {
+            beforeUnload = $0
+            stage("beforeunload-callback-\($0.kind)", configuration)
+        }
+        try validationPage.load(configuration.beforeUnloadPage)
+        try await wait(for: validationPage, url: configuration.beforeUnloadPage,
+                       title: configuration.beforeUnloadReadyTitle)
+        try JSONEncoder().encode([
+            "url": configuration.beforeUnloadPage.absoluteString
+        ]).write(to: configuration.beforeUnloadMarker, options: .atomic)
+        try await waitForCondition("trusted beforeunload activation") {
+            FileManager.default.fileExists(atPath: configuration.beforeUnloadActivated.path)
+        }
+        stage("beforeunload-load-call", configuration)
+        try validationPage.load(configuration.beforeUnloadTarget)
+        stage("beforeunload-load-returned", configuration)
+        try await waitForCondition("cross-origin beforeunload prompt") {
+            beforeUnload?.isPending == true && validationPage.hasPendingPrompt
+        }
+        guard let beforeUnload else {
+            throw ValidationError("Cross-origin beforeunload request was not delivered.")
+        }
+        checks["crossOriginBeforeUnloadMetadata"] = beforeUnload.page === validationPage &&
+            beforeUnload.kind == .beforeUnload && !beforeUnload.isReload &&
+            !beforeUnload.requestingOrigin.isEmpty && !beforeUnload.topLevelOrigin.isEmpty
+        checks["crossOriginBeforeUnloadAccepted"] = beforeUnload.accept() && !beforeUnload.cancel()
+        try await wait(for: validationPage, url: configuration.beforeUnloadTarget,
+                       title: configuration.domTitle)
+        runtime.onJavaScriptDialog = nil
+
+        stage("http-auth", configuration)
+        var directAuthRequest: ChromiumHTTPAuthRequest?
+        runtime.onHTTPAuthRequest = { directAuthRequest = $0 }
+        let directAuthPage = try openedContext.makePage(
+            url: configuration.httpAuthDirect, hostWindowID: UUID())
+        auxiliaryPages.append(directAuthPage)
+        try await waitForCondition("fresh-page HTTP authentication request") {
+            directAuthRequest?.page === directAuthPage && directAuthRequest?.isPending == true
+        }
+        guard let directAuthRequest else {
+            throw ValidationError("Fresh-page HTTP authentication request was not delivered.")
+        }
+        checks["freshPageHTTPAuthMetadata"] =
+            directAuthRequest.requestURL == configuration.httpAuthDirect &&
+            directAuthRequest.primaryMainFrameNavigation && directAuthRequest.navigation &&
+            directAuthRequest.firstAttempt && !directAuthRequest.isProxy
+        checks["httpAuthPromptMoveRejected"] = moveIsRejectedWhilePending(directAuthPage)
+        checks["httpAuthPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
+            directAuthPage, reserveHost: reserveHost, closeHost: closeHost)
+        checks["freshPageHTTPAuthSubmit"] = directAuthRequest.submit(
+            username: "cobble", password: configuration.token)
+        try await wait(for: directAuthPage, url: configuration.httpAuthDirect,
+                       title: configuration.authGrantedTitle)
+        checks["httpAuthMoveAfterResolution"] = try await moveRoundTrips(directAuthPage)
+        directAuthPage.forceClose()
+        guard await directAuthPage.waitUntilClosed() else {
+            throw ValidationError("Fresh-page authentication fixture did not close.")
+        }
+
+        var authRequest: ChromiumHTTPAuthRequest?
+        runtime.onHTTPAuthRequest = { authRequest = $0 }
+        try validationPage.load(configuration.httpAuth)
+        try await waitForCondition("pending HTTP authentication request") {
+            authRequest?.isPending == true && validationPage.hasPendingPrompt
+        }
+        guard let authRequest else {
+            throw ValidationError("Native HTTP authentication request was not delivered.")
+        }
+        checks["httpAuthMetadata"] = authRequest.page === validationPage &&
+            authRequest.requestURL == configuration.httpAuth &&
+            authRequest.scheme.lowercased() == "basic" &&
+            authRequest.realm == "Cobble Fixture \(configuration.token)" &&
+            !authRequest.challengerOrigin.isEmpty && !authRequest.topLevelOrigin.isEmpty &&
+            !authRequest.isProxy && authRequest.firstAttempt &&
+            authRequest.primaryMainFrameNavigation && authRequest.navigation
+        checks["httpAuthSubmitExactlyOnce"] =
+            authRequest.submit(username: "cobble", password: configuration.token) &&
+            !authRequest.cancel()
+        try await wait(for: validationPage, url: configuration.httpAuth,
+                       title: configuration.authGrantedTitle)
+
+        var subresourceAuth: ChromiumHTTPAuthRequest?
+        runtime.onHTTPAuthRequest = { subresourceAuth = $0 }
+        try validationPage.load(configuration.httpAuthSubresourcePage)
+        try await waitForCondition("subresource HTTP authentication request") {
+            subresourceAuth?.isPending == true
+        }
+        guard let subresourceAuth else {
+            throw ValidationError("Subresource HTTP authentication request was not delivered.")
+        }
+        checks["subresourceHTTPAuthMetadata"] =
+            subresourceAuth.requestURL?.host == "cobble-auth-subresource.test" &&
+            !subresourceAuth.primaryMainFrameNavigation && !subresourceAuth.navigation &&
+            subresourceAuth.topLevelOrigin.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ==
+                configuration.origin.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        checks["subresourceHTTPAuthSubmit"] = subresourceAuth.submit(
+            username: "cobble", password: configuration.token)
+        try await wait(for: validationPage, url: configuration.httpAuthSubresourcePage,
+                       title: configuration.authSubresourceGrantedTitle)
+
+        var cancelledAuth: ChromiumHTTPAuthRequest?
+        var authCancellations = 0
+        runtime.onHTTPAuthRequest = { request in
+            cancelledAuth = request
+            request.onCancel = { authCancellations += 1 }
+        }
+        try validationPage.load(configuration.httpAuthCancellation)
+        try await waitForCondition("pending HTTP authentication before navigation") {
+            cancelledAuth?.isPending == true
+        }
+        try validationPage.load(configuration.domPage)
+        try await waitForCondition("HTTP authentication navigation cancellation") {
+            authCancellations == 1 && cancelledAuth?.isPending == false
+        }
+        checks["httpAuthNavigationCancelledOnce"] = cancelledAuth?.cancel() == false
+        runtime.onHTTPAuthRequest = nil
+
+        stage("file-chooser", configuration)
+        let selectedFile = configuration.userDataDirectory
+            .appendingPathComponent("chooser-\(configuration.token).txt")
+        try Data("selected \(configuration.token)".utf8).write(to: selectedFile)
+        var chooserRequest: ChromiumFileChooserRequest?
+        runtime.onFileChooserRequest = { chooserRequest = $0 }
+        try validationPage.load(configuration.fileChooser)
+        try await wait(for: validationPage, url: configuration.fileChooser,
+                       title: configuration.filePendingTitle)
+        try JSONSerialization.data(withJSONObject: [
+            "url": configuration.fileChooser.absoluteString,
+            "sequence": 1,
+            "removeFrame": false,
+        ]).write(to: configuration.fileChooserMarker, options: .atomic)
+        try await waitForCondition("pending file chooser") {
+            chooserRequest?.isPending == true && validationPage.hasPendingPrompt
+        }
+        guard let chooserRequest else {
+            throw ValidationError("Native file chooser request was not delivered.")
+        }
+        checks["fileChooserMetadata"] = chooserRequest.page === validationPage &&
+            chooserRequest.mode == .open && !chooserRequest.requestingOrigin.isEmpty &&
+            !chooserRequest.topLevelOrigin.isEmpty && chooserRequest.frameProcessID >= 0 &&
+            chooserRequest.frameRoutingID >= 0 && !chooserRequest.frameToken.isEmpty &&
+            chooserRequest.acceptedTypes.contains("text/plain")
+        checks["fileChooserPromptMoveRejected"] = moveIsRejectedWhilePending(validationPage)
+        checks["fileChooserPromptDevToolsRejected"] = devToolsOpenIsRejectedWithTemporaryHost(
+            validationPage, reserveHost: reserveHost, closeHost: closeHost)
+        checks["fileChooserSelectExactlyOnce"] =
+            chooserRequest.select([selectedFile]) && !chooserRequest.cancel()
+        try await wait(for: validationPage, url: configuration.fileChooser,
+                       title: configuration.fileSelectedTitle)
+        checks["fileChooserMoveAfterResolution"] = try await moveRoundTrips(validationPage)
+
+        var frameChooser: ChromiumFileChooserRequest?
+        var frameChooserCancellations = 0
+        runtime.onFileChooserRequest = { request in
+            frameChooser = request
+            request.onCancel = { frameChooserCancellations += 1 }
+        }
+        try validationPage.load(configuration.fileFrameParent)
+        try await wait(for: validationPage, url: configuration.fileFrameParent,
+                       title: configuration.fileFrameTitle)
+        try JSONSerialization.data(withJSONObject: [
+            "url": configuration.fileFrameParent.absoluteString,
+            "sequence": 2,
+            "removeFrame": true,
+        ]).write(to: configuration.fileChooserMarker, options: .atomic)
+        try await waitForCondition("iframe file chooser request") {
+            frameChooser?.isPending == true
+        }
+        try await waitForCondition("removed iframe file chooser cancellation") {
+            frameChooserCancellations == 1 && frameChooser?.isPending == false
+        }
+        checks["removedFrameFileChooserCancelledOnce"] = frameChooser?.cancel() == false &&
+            !validationPage.hasPendingPrompt
+
+        var crashChooser: ChromiumFileChooserRequest?
+        var crashChooserCancellations = 0
+        runtime.onFileChooserRequest = { request in
+            crashChooser = request
+            request.onCancel = { crashChooserCancellations += 1 }
+        }
+        let crashPage = try openedContext.makePage(
+            url: configuration.crashFileChooser, hostWindowID: UUID())
+        auxiliaryPages.append(crashPage)
+        try await wait(for: crashPage, url: configuration.crashFileChooser,
+                       title: configuration.filePendingTitle)
+        let targetCrashToolsHost = reserveHost()
+        let targetCrashTools = try crashPage.openDevTools(hostWindowID: targetCrashToolsHost)
+        var targetCrashToolsCloseCount = 0
+        targetCrashTools.onClose = { targetCrashToolsCloseCount += 1 }
+        guard showDevTools(targetCrashTools, targetCrashToolsHost) else {
+            throw ValidationError("Target-crash DevTools frontend did not attach.")
+        }
+        try JSONSerialization.data(withJSONObject: [
+            "url": configuration.crashFileChooser.absoluteString,
+            "sequence": 3,
+            "removeFrame": false,
+        ]).write(to: configuration.fileChooserMarker, options: .atomic)
+        try await waitForCondition("file chooser before renderer crash") {
+            crashChooser?.page === crashPage && crashChooser?.isPending == true
+        }
+        try JSONEncoder().encode([
+            "url": configuration.crashFileChooser.absoluteString
+        ]).write(to: configuration.promptCrashMarker, options: .atomic)
+        try await waitForCondition("renderer crash prompt cancellation") {
+            crashPage.isCrashed && crashChooserCancellations == 1 &&
+                crashChooser?.isPending == false
+        }
+        try await waitForCondition("inspected target crash closes DevTools") {
+            targetCrashTools.isClosed && targetCrashToolsCloseCount == 1
+        }
+        checks["rendererTerminationReasonAvailable"] =
+            crashPage.rendererTerminationStatus != nil && !crashPage.isDocumentReady &&
+            !crashPage.isUnresponsive
+        checks["rendererCrashFileChooserCancelledOnce"] =
+            crashChooser?.select([selectedFile]) == false
+        checks["devToolsTargetCrashClosesOnce"] = targetCrashTools.isClosed &&
+            !targetCrashTools.close() && targetCrashToolsCloseCount == 1
+        closeHost?(targetCrashToolsHost)
+        checks["crashedConnectionDetailsUnavailable"] =
+            try await crashPage.connectionDetails() == nil
+        crashPage.forceClose()
+        guard await crashPage.waitUntilClosed() else {
+            throw ValidationError("Renderer crash prompt fixture did not close.")
+        }
+        let selectedFolder = configuration.userDataDirectory
+            .appendingPathComponent("chooser-folder-\(configuration.token)", isDirectory: true)
+        let nestedFolder = selectedFolder.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedFolder,
+                                                withIntermediateDirectories: true)
+        try Data("top \(configuration.token)".utf8)
+            .write(to: selectedFolder.appendingPathComponent("a.txt"))
+        try Data("nested \(configuration.token)".utf8)
+            .write(to: nestedFolder.appendingPathComponent("b.txt"))
+        var folderChooserRequest: ChromiumFileChooserRequest?
+        runtime.onFileChooserRequest = { folderChooserRequest = $0 }
+        try validationPage.load(configuration.fileFolder)
+        try await wait(for: validationPage, url: configuration.fileFolder,
+                       title: configuration.folderPendingTitle)
+        try JSONSerialization.data(withJSONObject: [
+            "url": configuration.fileFolder.absoluteString,
+            "sequence": 4,
+            "removeFrame": false,
+        ]).write(to: configuration.fileChooserMarker, options: .atomic)
+        try await waitForCondition("pending folder upload chooser") {
+            folderChooserRequest?.isPending == true
+        }
+        guard let folderRequest = folderChooserRequest, folderRequest.mode == .uploadFolder,
+              folderRequest.select([selectedFolder]) else {
+            throw ValidationError("Native folder upload selection was rejected.")
+        }
+        try await wait(for: validationPage, url: configuration.fileFolder,
+                       title: configuration.folderSelectedTitle)
+        checks["folderUploadEnumeratesNestedRelativePaths"] = true
+
+        stage("exclusive-access", configuration)
+        try validationPage.load(configuration.exclusiveAccess)
+        try await wait(for: validationPage, url: configuration.exclusiveAccess,
+                       title: configuration.exclusiveReadyTitle)
+        // Chromium 157 refuses page fullscreen unless the page view has
+        // focus in the key window, as after a real click.
+        NSApp.activate(ignoringOtherApps: true)
+        validationPage.nativeView.window?.makeKeyAndOrderFront(nil)
+        validationPage.focus()
+        try? await waitForCondition("exclusive page key window") {
+            validationPage.nativeView.window?.isKeyWindow == true
+        }
+        FileHandle.standardError.write(Data(
+            "exclusive focus key=\(validationPage.nativeView.window?.isKeyWindow ?? false)\n".utf8))
+        let exclusiveWindowIDs = Set(NSApp.windows.map(ObjectIdentifier.init))
+        try JSONSerialization.data(withJSONObject: [
+            "url": configuration.exclusiveAccess.absoluteString,
+        ]).write(to: configuration.exclusiveAccessMarker, options: .atomic)
+        for capability in ["pip", "documentPip", "displayMedia", "bluetooth",
+                           "usb", "serial", "hid", "payment"] {
+            try await waitForCondition("exclusive \(capability) result") {
+                guard let data = try? Data(contentsOf: configuration.exclusiveAccessOutcome),
+                      let value = try? JSONSerialization.jsonObject(with: data)
+                        as? [String: Any],
+                      let outcomes = value["containment"] as? [String: Any]
+                else { return false }
+                return outcomes[capability] != nil
+            }
+        }
+        try await wait(for: validationPage, url: configuration.exclusiveAccess,
+                       title: configuration.exclusiveDeniedTitle, timeout: .seconds(32))
+        let exclusiveDOM = try await validationPage.currentDOM()
+        let capabilityOutcomes = ["fullscreen-outcome", "fullscreen-entered-and-exited",
+                                  "bluetooth", "usb", "serial", "hid", "payment"].map {
+            "\($0)=\(attribute(named: $0, in: exclusiveDOM) ?? "missing")"
+        }.joined(separator: " ")
+        FileHandle.standardError.write(Data("exclusive capabilities \(capabilityOutcomes)\n".utf8))
+        checks["exclusivePageVisible"] = validationPage.nativeView.window != nil &&
+            exclusiveDOM.contains("data-visibility=\"visible\"") &&
+            exclusiveDOM.contains("data-focused=\"true\"") &&
+            exclusiveDOM.contains("data-viewport=\"true\"") &&
+            exclusiveDOM.contains("data-fullscreen-enabled=\"true\"")
+        checks["fullscreenEnteredAndExited"] =
+            exclusiveDOM.contains("data-fullscreen-entered-and-exited=\"true\"")
+        checks["pointerLockDenied"] = exclusiveDOM.contains("data-pointer-denied=\"true\"")
+        checks["keyboardLockDeniedWithoutKeyCapture"] =
+            exclusiveDOM.contains("data-keyboard-denied=\"true\"") &&
+            exclusiveDOM.contains("data-key-delivered=\"true\"")
+        checks["deviceAndPaymentRequestsSettleDenied"] =
+            ["bluetooth", "usb", "serial", "hid", "payment"].allSatisfy {
+                exclusiveDOM.contains("data-\($0)=\"rejected\"") ||
+                    exclusiveDOM.contains("data-\($0)=\"empty\"") ||
+                    exclusiveDOM.contains("data-\($0)=\"unavailable\"")
+            }
+        // The page's own fullscreen Space (fullscreen runs first) must close
+        // after exit. Its AppKit Space machinery (NS* windows) is not an
+        // escape; any other new visible window, such as a Views PiP, is.
+        let ownedFullscreen = { (window: NSWindow) in
+            NSStringFromClass(type(of: window)) == "CobbleContentFullscreenWindow"
+        }
+        try? await waitForCondition("page fullscreen window closed") {
+            !NSApp.windows.contains { ownedFullscreen($0) && $0.isVisible }
+        }
+        checks["fullscreenWindowClosedAfterExit"] =
+            !NSApp.windows.contains { ownedFullscreen($0) && $0.isVisible }
+        let escapedWindows = NSApp.windows.filter {
+            let name = NSStringFromClass(type(of: $0))
+            return $0.isVisible && !exclusiveWindowIDs.contains(ObjectIdentifier($0)) &&
+                !ownedFullscreen($0) && !name.hasPrefix("NS") && !name.hasPrefix("_NS")
+        }
+        let noCapabilityWindowEscaped = escapedWindows.isEmpty
+        if !escapedWindows.isEmpty {
+            let names = escapedWindows.map { NSStringFromClass(type(of: $0)) }
+            FileHandle.standardError.write(Data("exclusive escaped windows \(names)\n".utf8))
+        }
+        checks["pictureInPictureDeniedNoWindow"] =
+            exclusiveDOM.contains("data-pip=\"rejected\"") &&
+            exclusiveDOM.contains("data-pip-activation=\"true\"") &&
+            exclusiveDOM.contains("data-pip-video-ready=\"true\"") &&
+            noCapabilityWindowEscaped
+        checks["documentPictureInPictureDeniedNoWindow"] =
+            (exclusiveDOM.contains("data-document-pip=\"rejected\"") ||
+                exclusiveDOM.contains("data-document-pip=\"unavailable\"")) &&
+            (exclusiveDOM.contains("data-document-pip=\"unavailable\"") ||
+                exclusiveDOM.contains("data-document-pip-activation=\"true\"")) &&
+            noCapabilityWindowEscaped
+        checks["displayMediaDeniedNoPicker"] =
+            exclusiveDOM.contains("data-display-media=\"rejected\"") &&
+            exclusiveDOM.contains("data-display-media-activation=\"true\"") &&
+            noCapabilityWindowEscaped
+
+        runtime.onFileChooserRequest = nil
     }
 
     private static func cleanup(runtime: ChromiumRuntime, context: ChromiumContext?, page: ChromiumPage?,
