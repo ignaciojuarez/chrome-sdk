@@ -33,10 +33,14 @@ page. Streams carry video only. `ChromiumPage.isCapturingDisplay` and
 (stop-all) now ends them too. Without Chromium's macOS picker, display requests
 are refused before the host is asked. Window management (`getScreenDetails`)
 arrives as `.windowManagement` and accepts `allow()` or `deny()`. Set
-`ChromiumContext.permissionResolver` to answer status checks, including quiet
-checks on load, from saved decisions. Chromium keeps only a session grant for
-unsaved answers and stores no denial;
-`ChromiumContext.resetPermission(.windowManagement, origin:)` clears it. Other
+`ChromiumContext.permissionResolver` to answer camera, microphone and
+window-management status checks from saved decisions, including quiet checks
+on load, `permissions.query` and whether `enumerateDevices` names devices.
+Chromium keeps only a session grant for unsaved answers and stores no denial.
+An allowed camera or microphone request leaves a one-time grant for the
+top-level origin, so sites can list and pick devices;
+`ChromiumContext.resetPermission(_:origin:)` clears `.camera`, `.microphone` and
+`.windowManagement` grants. Other
 prompt-backed permissions stay denied. This client requires a rebuilt ABI 19
 runtime.
 

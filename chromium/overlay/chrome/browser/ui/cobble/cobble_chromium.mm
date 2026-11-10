@@ -44,6 +44,7 @@
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
+#include "chrome/browser/media/webrtc/media_stream_device_permission_context.h"
 #include "chrome/browser/permissions/system/system_media_capture_permissions_mac.h"
 #include "chrome/browser/profiles/nuke_profile_directory_utils.h"
 #include "chrome/browser/profiles/profile.h"
@@ -63,6 +64,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/common/content_settings_constraints.h"
 #include "components/history/core/common/pref_names.h"
 #include "components/keep_alive_registry/keep_alive_registry.h"
 #include "components/find_in_page/find_result_observer.h"
@@ -548,6 +550,40 @@ void FinishMediaRequest(uint64_t id,
   FinishMediaRequest(id, result, devices, notify_cancelled);
 }
 
+// Like Chrome's "Allow this time": after the host allows camera or microphone,
+// Chromium keeps a one-time grant so enumerateDevices exposes device IDs and
+// labels and permissions.query reports granted, as sites such as Zoom and Meet
+// expect. Camera and microphone are delegated, so the grant belongs to the
+// top-level origin. It lasts while the site stays open, as in Chrome, and
+// CCSContextResetPermission clears it.
+void GrantMediaForSession(const CCSMediaPermissionRequest& request) {
+  content::RenderFrameHost* frame =
+      content::RenderFrameHost::FromID(request.frame_id);
+  if (!frame) {
+    return;
+  }
+  const url::Origin top = frame->GetMainFrame()->GetLastCommittedOrigin();
+  if (top.opaque() || !network::IsOriginPotentiallyTrustworthy(top)) {
+    return;
+  }
+  const GURL url = top.GetURL();
+  content_settings::ContentSettingConstraints constraints;
+  constraints.set_session_model(
+      content_settings::mojom::SessionModel::ONE_TIME);
+  HostContentSettingsMap* map = HostContentSettingsMapFactory::GetForProfile(
+      Profile::FromBrowserContext(frame->GetBrowserContext()));
+  if (request.kinds & CCS_MEDIA_PERMISSION_MICROPHONE) {
+    map->SetContentSettingDefaultScope(url, url,
+                                       ContentSettingsType::MEDIASTREAM_MIC,
+                                       CONTENT_SETTING_ALLOW, constraints);
+  }
+  if (request.kinds & CCS_MEDIA_PERMISSION_CAMERA) {
+    map->SetContentSettingDefaultScope(url, url,
+                                       ContentSettingsType::MEDIASTREAM_CAMERA,
+                                       CONTENT_SETTING_ALLOW, constraints);
+  }
+}
+
 void ContinueAllowedMediaRequest(uint64_t id) {
   CCSMediaPermissionRequest* pending = FindMediaRequest(id);
   if (!pending || !MediaRequestIsLive(*pending)) {
@@ -607,6 +643,7 @@ void ContinueAllowedMediaRequest(uint64_t id) {
       return;
     }
   }
+  GrantMediaForSession(*pending);
   blink::mojom::StreamDevicesSet devices;
   devices.stream_devices.push_back(std::move(stream));
   FinishMediaRequest(id, MediaResult::OK, devices);
@@ -791,10 +828,12 @@ bool RoutePermissionRequest(
   return true;
 }
 
-// Saved host decisions answer Chromium's window-management status checks, so a
-// remembered allow or deny also holds for quiet checks and permissions.query.
-std::optional<ContentSetting> ResolveWindowManagementStatus(
+// Saved host decisions answer Chromium's status checks for host-decided
+// permissions, so a remembered allow or deny also holds for quiet checks,
+// enumerateDevices and permissions.query.
+std::optional<ContentSetting> ResolveHostPermissionStatus(
     content::BrowserContext* browser_context,
+    uint32_t kind,
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
   CheckUIThread();
@@ -807,10 +846,9 @@ std::optional<ContentSetting> ResolveWindowManagementStatus(
         url::Origin::Create(requesting_origin).Serialize();
     const std::string embedding =
         url::Origin::Create(embedding_origin).Serialize();
-    switch (context->permission_resolver(
-        context->permission_resolver_data,
-        CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT, requesting.c_str(),
-        embedding.c_str())) {
+    switch (context->permission_resolver(context->permission_resolver_data,
+                                         kind, requesting.c_str(),
+                                         embedding.c_str())) {
       case 1:
         return CONTENT_SETTING_ALLOW;
       case 2:
@@ -820,6 +858,32 @@ std::optional<ContentSetting> ResolveWindowManagementStatus(
     }
   }
   return std::nullopt;
+}
+
+std::optional<ContentSetting> ResolveWindowManagementStatus(
+    content::BrowserContext* browser_context,
+    const GURL& requesting_origin,
+    const GURL& embedding_origin) {
+  return ResolveHostPermissionStatus(browser_context,
+                                     CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT,
+                                     requesting_origin, embedding_origin);
+}
+
+std::optional<ContentSetting> ResolveMediaStreamStatus(
+    content::BrowserContext* browser_context,
+    ContentSettingsType type,
+    const GURL& requesting_origin,
+    const GURL& embedding_origin) {
+  const uint32_t kind = type == ContentSettingsType::MEDIASTREAM_MIC
+                            ? CCS_MEDIA_PERMISSION_MICROPHONE
+                        : type == ContentSettingsType::MEDIASTREAM_CAMERA
+                            ? CCS_MEDIA_PERMISSION_CAMERA
+                            : 0;
+  if (!kind) {
+    return std::nullopt;
+  }
+  return ResolveHostPermissionStatus(browser_context, kind, requesting_origin,
+                                     embedding_origin);
 }
 
 BrowserEntry* EntryForBrowser(Browser* browser) {
@@ -1683,6 +1747,8 @@ extern "C" int32_t CCSSetClient(const CCSClientV13* client) {
       &RoutePermissionRequest);
   permissions::WindowManagementPermissionContext::SetEmbedderStatusResolver(
       &ResolveWindowManagementStatus);
+  MediaStreamDevicePermissionContext::SetEmbedderStatusResolver(
+      &ResolveMediaStreamStatus);
   return 0;
 }
 
@@ -1815,8 +1881,11 @@ extern "C" uint8_t CCSContextResetPermission(CCSContextRef context,
                                              const char* origin_utf8,
                                              uint32_t kinds) {
   CheckUIThread();
-  if (!context || !context->profile || !origin_utf8 ||
-      kinds != CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT) {
+  constexpr uint32_t kResettable = CCS_MEDIA_PERMISSION_MICROPHONE |
+                                   CCS_MEDIA_PERMISSION_CAMERA |
+                                   CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT;
+  if (!context || !context->profile || !origin_utf8 || !kinds ||
+      (kinds & ~kResettable)) {
     return 0;
   }
   const GURL url(origin_utf8);
@@ -1824,13 +1893,24 @@ extern "C" uint8_t CCSContextResetPermission(CCSContextRef context,
   if (!url.is_valid() || origin.opaque() || origin.Serialize() != origin_utf8) {
     return 0;
   }
-  HostContentSettingsMapFactory::GetForProfile(context->profile)
-      ->ClearSettingsForOneTypeWithPredicate(
-          ContentSettingsType::WINDOW_MANAGEMENT,
-          [&url](const ContentSettingPatternSource& setting) {
-            return setting.primary_pattern != ContentSettingsPattern::Wildcard() &&
-                   setting.primary_pattern.Matches(url);
-          });
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(context->profile);
+  const auto clear = [map, &url](ContentSettingsType type) {
+    map->ClearSettingsForOneTypeWithPredicate(
+        type, [&url](const ContentSettingPatternSource& setting) {
+          return setting.primary_pattern != ContentSettingsPattern::Wildcard() &&
+                 setting.primary_pattern.Matches(url);
+        });
+  };
+  if (kinds & CCS_MEDIA_PERMISSION_MICROPHONE) {
+    clear(ContentSettingsType::MEDIASTREAM_MIC);
+  }
+  if (kinds & CCS_MEDIA_PERMISSION_CAMERA) {
+    clear(ContentSettingsType::MEDIASTREAM_CAMERA);
+  }
+  if (kinds & CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT) {
+    clear(ContentSettingsType::WINDOW_MANAGEMENT);
+  }
   return 1;
 }
 

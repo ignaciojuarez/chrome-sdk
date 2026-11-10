@@ -229,9 +229,29 @@ export async function startFixture(token, downloadDirectory) {
       });
       const phase = url.searchParams.get("phase") ?? "";
       const display = phase.startsWith("display");
+      // What sites such as Zoom read before and after asking: permission
+      // state, then device IDs and labels, then a stream for a chosen ID.
+      const devices = `const states = () => Promise.all(["camera", "microphone"].map(name =>
+          navigator.permissions.query({name}).then(status => status.state)));
+        const listed = () => navigator.mediaDevices.enumerateDevices().then(list =>
+          ["videoinput", "audioinput"].map(kind =>
+            list.find(device => device.kind === kind && device.deviceId && device.label)));`;
       // Stock Chromium asks only with a click; screens-again checks the
       // session grant quietly on load.
-      response.end(phase.startsWith("screens") ? `<!doctype html><html data-run="${token}"><head>
+      response.end(phase === "devices" ? `<!doctype html><html data-run="${token}"><head>
+        <title>Cobble Devices Pending ${token}</title></head><body><script>${devices}
+        Promise.all([states(), listed()]).then(([state, found]) => {
+          document.title = ${JSON.stringify(`Cobble Devices ${token}`)} + " " + state.join(" ") + " " +
+            found.map(Boolean).join(" ");
+        }, error => { document.title = ${JSON.stringify(`Cobble Devices Failed ${token}`)} + " " + error.name; });
+        </script></body></html>` : phase === "exact" ? `<!doctype html><html data-run="${token}"><head>
+        <title>Cobble Exact Pending ${token}</title></head><body><script>${devices}
+        listed().then(([video, audio]) => navigator.mediaDevices.getUserMedia({
+          video: {deviceId: {exact: video.deviceId}}, audio: {deviceId: {exact: audio.deviceId}}})).then(stream => {
+          window.cobbleMediaStream = stream;
+          document.title = ${JSON.stringify(`Cobble Exact Granted ${token}`)};
+        }, error => { document.title = ${JSON.stringify(`Cobble Exact Denied ${token}`)} + " " + error.name; });
+        </script></body></html>` : phase.startsWith("screens") ? `<!doctype html><html data-run="${token}"><head>
         <title>Cobble Screens Pending ${token}</title></head><body>
         <button style="position:fixed;inset:0;width:100%;height:100%">Read screens</button><script>
         const state = () => navigator.permissions.query({name: "window-management"}).then(status => status.state);
@@ -2237,6 +2257,8 @@ async function main() {
       "closedConnectionDetailsRejected", "crashedConnectionDetailsUnavailable",
       "unhandledMediaDenied", "combinedMediaRequestMetadata", "mediaAllowExactlyOnce",
       "mediaCaptureStateReported", "mediaCaptureStopped",
+      "mediaAllowExposesDevices", "mediaExactDeviceGranted", "mediaResetHidesDevices",
+      "mediaSavedDecisionsAnswerQuietly", "mediaResetValidatesKind",
       "mediaPromptMoveRejected", "mediaMoveAfterResolution",
       "mediaPromptDevToolsRejected",
       "navigatedMediaRequestCancelled", "closedMediaRequestCancelled",

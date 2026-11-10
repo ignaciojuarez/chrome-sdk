@@ -35,8 +35,10 @@ typedef int32_t (*CCSIdentityResolver)(void* user_data, const char* url_utf8);
 
 // ABI 19: synchronous on Chromium's UI thread whenever Chromium checks a
 // host-decided permission's status, including quiet checks without a prompt.
-// `kind` is a CCSMediaPermissionKind; only WINDOW_MANAGEMENT is asked today.
-// Return 1 for allowed, 2 for denied, or 0 to keep Chromium's session state.
+// `kind` is one CCSMediaPermissionKind: MICROPHONE, CAMERA (also asked for
+// enumerateDevices and permissions.query, with the top-level origin as both
+// origins) or WINDOW_MANAGEMENT. Return 1 for allowed, 2 for denied, or 0 to
+// keep Chromium's session state.
 // Origin storage is valid only while the callback runs.
 typedef int32_t (*CCSPermissionResolver)(void* user_data,
                                          uint32_t kind,
@@ -470,9 +472,10 @@ CCS_EXPORT void CCSContextOpen(const char* profile_key_utf8,
                     CCSContextOpenedCallback callback);
 CCS_EXPORT void CCSContextRelease(CCSContextRef context);
 // ABI 19: forgets Chromium's session grant of `kinds` for a serialized origin
-// such as "https://example.com". Only CCS_MEDIA_PERMISSION_WINDOW_MANAGEMENT is
-// accepted; Chromium stores no other host-decided permission. Returns zero for
-// an invalid context, origin or kind.
+// such as "https://example.com". Accepts MICROPHONE, CAMERA and
+// WINDOW_MANAGEMENT; an allowed camera or microphone request leaves a one-time
+// grant for its top-level origin. Returns zero for an invalid context, origin
+// or kind.
 CCS_EXPORT uint8_t CCSContextResetPermission(CCSContextRef context,
                                              const char* origin_utf8,
                                              uint32_t kinds);

@@ -874,6 +874,61 @@ enum HarnessValidation {
             }
             checks["mediaCaptureStopped"] = true
 
+            // Like Chrome's "Allow this time", that allow leaves a one-time grant:
+            // permissions.query reports granted and enumerateDevices exposes IDs and
+            // labels, which sites such as Zoom and Meet need to pick a device.
+            let mediaOrigin = configuration.secureOriginString
+            let mediaDevices = configuration.phased(configuration.mediaPage, "devices")
+            func mediaDevicesTitle(_ state: String, _ listed: Bool) -> String {
+                "Cobble Devices \(configuration.token) \(state) \(state) \(listed) \(listed)"
+            }
+            try validationPage.load(mediaDevices)
+            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("granted", true))
+            checks["mediaAllowExposesDevices"] = true
+            var exactRequests: [ChromiumMediaPermissionRequest] = []
+            runtime.onMediaPermissionRequest = { exactRequests.append($0); $0.allow() }
+            let exactMedia = configuration.phased(configuration.mediaPage, "exact")
+            try validationPage.load(exactMedia)
+            try await wait(for: validationPage, url: exactMedia,
+                           title: "Cobble Exact Granted \(configuration.token)")
+            checks["mediaExactDeviceGranted"] = exactRequests.count == 1 &&
+                exactRequests[0].kinds == [.camera, .microphone]
+            guard validationPage.stopMediaCapture() else {
+                throw ValidationError("Native media capture stop was rejected after the exact-device request.")
+            }
+            try await waitForCondition("exact-device media capture stop") {
+                !validationPage.isCapturingMicrophone && !validationPage.isCapturingCamera
+            }
+            runtime.onMediaPermissionRequest = nil
+            guard validationPage.context.resetPermission([.camera, .microphone], origin: mediaOrigin) else {
+                throw ValidationError("Native camera and microphone reset was rejected.")
+            }
+            try validationPage.load(mediaDevices)
+            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("prompt", false))
+            checks["mediaResetHidesDevices"] = true
+            // Saved host decisions answer the same quiet checks.
+            var mediaResolved: [(ChromiumMediaPermissionKinds, String, String)] = []
+            var mediaSaved = ChromiumPermissionSetting.allow
+            validationPage.context.permissionResolver = { kind, requesting, embedding in
+                mediaResolved.append((kind, requesting, embedding))
+                return kind == .windowManagement ? .ask : mediaSaved
+            }
+            try validationPage.load(mediaDevices)
+            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("granted", true))
+            mediaSaved = .deny
+            try validationPage.load(mediaDevices)
+            try await wait(for: validationPage, url: mediaDevices, title: mediaDevicesTitle("denied", false))
+            validationPage.context.permissionResolver = nil
+            checks["mediaSavedDecisionsAnswerQuietly"] = mediaResolved.contains { $0.0 == .camera } &&
+                mediaResolved.contains { $0.0 == .microphone } &&
+                mediaResolved.allSatisfy {
+                    ($0.0 == .camera || $0.0 == .microphone) && $0.1 == mediaOrigin && $0.2 == mediaOrigin
+                }
+            checks["mediaResetValidatesKind"] =
+                !validationPage.context.resetPermission([], origin: mediaOrigin) &&
+                !validationPage.context.resetPermission([.camera, .display], origin: mediaOrigin) &&
+                !validationPage.context.resetPermission(.camera, origin: mediaOrigin + "/path")
+
             var navigatedRequest: ChromiumMediaPermissionRequest?
             var navigationCancelled = false
             runtime.onMediaPermissionRequest = { request in
