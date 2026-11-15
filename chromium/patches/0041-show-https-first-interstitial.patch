@@ -1,0 +1,100 @@
+diff --git a/chrome/browser/ssl/https_only_mode_tab_helper.cc b/chrome/browser/ssl/https_only_mode_tab_helper.cc
+index d10cb5ecca..ac47b257d0 100644
+--- a/chrome/browser/ssl/https_only_mode_tab_helper.cc
++++ b/chrome/browser/ssl/https_only_mode_tab_helper.cc
+@@ -5,6 +5,7 @@
+ #include "chrome/browser/ssl/https_only_mode_tab_helper.h"
+ 
+ #include "base/feature_list.h"
++#include "build/build_config.h"
+ #include "chrome/browser/ssl/ask_before_http_dialog_controller.h"
+ #include "components/security_interstitials/core/features.h"
+ #include "components/tabs/public/tab_interface.h"
+@@ -14,6 +15,10 @@
+ #include "content/public/browser/web_contents.h"
+ #include "url/gurl.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ HttpsOnlyModeTabHelper::~HttpsOnlyModeTabHelper() = default;
+ 
+ void HttpsOnlyModeTabHelper::DidStartNavigation(
+@@ -62,6 +67,13 @@ void HttpsOnlyModeTabHelper::DidFinishNavigation(
+   if (!navigation_handle->IsInPrimaryMainFrame()) {
+     return;
+   }
++#if BUILDFLAG(IS_MAC)
++  // The upgrades throttle shows a full-page interstitial for Cobble instead;
++  // its tabs have no Chrome window to anchor the Ask-before-HTTP dialog.
++  if (cobble_chromium::IsEnabled()) {
++    return;
++  }
++#endif
+ 
+   // TODO(crbug.com/351990829): Consider if this check could be made more
+   // precise. One option mght be to communicate a "interstitial enabled" flag on
+diff --git a/chrome/browser/ssl/https_upgrades_navigation_throttle.cc b/chrome/browser/ssl/https_upgrades_navigation_throttle.cc
+index ddd4432f25..7da661479b 100644
+--- a/chrome/browser/ssl/https_upgrades_navigation_throttle.cc
++++ b/chrome/browser/ssl/https_upgrades_navigation_throttle.cc
+@@ -12,6 +12,7 @@
+ #include "base/memory/weak_ptr.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/time/time.h"
++#include "build/build_config.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ssl/https_first_mode_settings_tracker.h"
+ #include "chrome/browser/ssl/https_only_mode_tab_helper.h"
+@@ -33,6 +34,10 @@
+ #include "services/metrics/public/cpp/ukm_recorder.h"
+ #include "ui/base/page_transition_types.h"
+ 
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cobble/cobble_chromium.h"
++#endif
++
+ using security_interstitials::https_only_mode::Event;
+ 
+ namespace {
+@@ -44,6 +49,19 @@ std::optional<base::TimeDelta> g_fallback_delay;
+ // more like interstitials.
+ inline constexpr char kBlankPageHtml[] = "<html></html>";
+ 
++bool UseHttpsFirstDialogUi() {
++#if BUILDFLAG(IS_MAC)
++  // Cobble's host-owned AppKit windows cannot anchor Chrome's tab-modal
++  // Ask-before-HTTP dialog, which would abort the process. Show the
++  // full-page interstitial inside the page instead.
++  if (cobble_chromium::IsEnabled()) {
++    return false;
++  }
++#endif
++  return base::FeatureList::IsEnabled(
++      security_interstitials::features::kHttpsFirstDialogUi);
++}
++
+ }  // namespace
+ 
+ // static
+@@ -136,8 +154,7 @@ HttpsUpgradesNavigationThrottle::WillStartRequest() {
+       // Mark this as a fallback HTTP navigation and trigger the interstitial.
+       tab_helper->set_is_navigation_fallback(true);
+ 
+-      if (base::FeatureList::IsEnabled(
+-              security_interstitials::features::kHttpsFirstDialogUi)) {
++      if (UseHttpsFirstDialogUi()) {
+         // New dialog UI.
+         // Rewrite the response to a blank page. DidFinishNavigation will
+         // show the ABH dialog on top of this blank page.
+@@ -216,8 +233,7 @@ HttpsUpgradesNavigationThrottle::WillRedirectRequest() {
+     security_interstitials::https_only_mode::RecordInterstitialReason(
+         interstitial_state_);
+ 
+-    if (base::FeatureList::IsEnabled(
+-            security_interstitials::features::kHttpsFirstDialogUi)) {
++    if (UseHttpsFirstDialogUi()) {
+       // New dialog UI.
+       // Rewrite the response to a blank page and cancel the navigation.
+       // HttpsOnlyModeTabHelper::DidFinishNavigation() will
