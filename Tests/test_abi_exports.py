@@ -195,6 +195,16 @@ class ABIExportTests(unittest.TestCase):
         self.assertIn("cobble_chromium::IsEnabled()", pip[:500])
         self.assertIn("return nullptr", pip[:500])
 
+    def test_https_first_fallback_uses_page_interstitial_not_tab_dialog(self):
+        patch = (ROOT / "chromium/patches/0041-show-https-first-interstitial.patch").read_text()
+        gate = patch[patch.index("bool UseHttpsFirstDialogUi() {"):]
+        self.assertLess(gate.index("cobble_chromium::IsEnabled()"),
+                        gate.index("kHttpsFirstDialogUi"))
+        self.assertEqual(2, patch.count("+      if (UseHttpsFirstDialogUi()) {")
+                         + patch.count("+    if (UseHttpsFirstDialogUi()) {"))
+        helper = patch[patch.index("HttpsOnlyModeTabHelper::DidFinishNavigation"):]
+        self.assertIn("cobble_chromium::IsEnabled()", helper[:600])
+
     def test_extension_completion_waits_for_dnr_matcher_readiness(self):
         source = (ROOT / "chromium/overlay/chrome/browser/ui/cobble/cobble_extensions.mm").read_text()
         for boundary in ("WaitForInitialRulesets", "PendingRulesReadiness",
