@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/history/history_tab_helper.cc b/chrome/browser/history/history_tab_helper.cc
-index 41e33ac73f..0eeab149c9 100644
+index 1392d581d8..ea97e62eb8 100644
 --- a/chrome/browser/history/history_tab_helper.cc
 +++ b/chrome/browser/history/history_tab_helper.cc
 @@ -648,6 +648,9 @@ void HistoryTabHelper::TitleWasSet(NavigationEntry* entry) {
@@ -21,10 +21,10 @@ index 41e33ac73f..0eeab149c9 100644
  
  void HistoryTabHelper::WebContentsDestroyed() {
 diff --git a/chrome/common/extensions/api/_api_features.json b/chrome/common/extensions/api/_api_features.json
-index 340a5e03ac..9f96796eda 100644
+index e80973400f..c40a90b6ae 100644
 --- a/chrome/common/extensions/api/_api_features.json
 +++ b/chrome/common/extensions/api/_api_features.json
-@@ -541,6 +541,7 @@
+@@ -526,6 +526,7 @@
      "contexts": ["privileged_extension"]
    },
    "history": {

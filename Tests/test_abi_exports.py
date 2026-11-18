@@ -191,7 +191,7 @@ class ABIExportTests(unittest.TestCase):
         self.assertIn("cobble_chromium::IsEnabled()", video[:600])
         self.assertIn("PictureInPictureResult::kNotSupported", video[:600])
         document = patch[patch.index("chrome/browser/ui/navigator/browser_navigator.cc"):]
-        pip = document[document.index("WindowOpenDisposition::NEW_PICTURE_IN_PICTURE"):]
+        pip = document[document.index("WindowOpenDisposition::kNewPictureInPicture"):]
         self.assertIn("cobble_chromium::IsEnabled()", pip[:500])
         self.assertIn("return nullptr", pip[:500])
 

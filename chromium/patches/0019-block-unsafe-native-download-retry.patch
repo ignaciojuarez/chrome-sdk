@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
-index 6b4147179e..f9695570d2 100644
+index 0cdc0223d3..14cd50364e 100644
 --- a/chrome/browser/download/chrome_download_manager_delegate.cc
 +++ b/chrome/browser/download/chrome_download_manager_delegate.cc
-@@ -2635,6 +2635,17 @@ void ChromeDownloadManagerDelegate::OnCheckDownloadAllowedComplete(
+@@ -2705,6 +2705,17 @@ void ChromeDownloadManagerDelegate::OnCheckDownloadAllowedComplete(
  #if !BUILDFLAG(IS_ANDROID)
  void ChromeDownloadManagerDelegate::AttachExtraInfo(
      download::DownloadItem* item) {

@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/renderer_context_menu/render_view_context_menu.cc b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-index cd1fc2e4db..2f746925b3 100644
+index 28b124adca..8be4bdf27b 100644
 --- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
 +++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-@@ -113,6 +113,9 @@
+@@ -117,6 +117,9 @@
  #include "chrome/browser/ui/browser_window.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -12,7 +12,7 @@ index cd1fc2e4db..2f746925b3 100644
  #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
-@@ -3839,6 +3842,12 @@ ui::ImageModel RenderViewContextMenu::GetIconForCommandId(
+@@ -3885,6 +3888,12 @@ ui::ImageModel RenderViewContextMenu::GetIconForCommandId(
  }
  
  bool RenderViewContextMenu::IsCommandIdVisible(int id) const {

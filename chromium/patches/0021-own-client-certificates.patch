@@ -1,13 +1,13 @@
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 3b45ad7952..0a40838982 100644
+index 1728c39e08..caecdcfda8 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -589,20 +589,21 @@
+@@ -585,20 +585,21 @@
+ #include "chrome/browser/indigo/onboarding/indigo_onboarding_dialog.h"
  #include "chrome/browser/loader/features.h"
  #include "chrome/browser/loader/fetch_keepalive_process_manager.h"
  #include "chrome/browser/metrics/usage_scenario/chrome_responsiveness_calculator_delegate.h"
  #include "chrome/browser/new_tab_page/new_tab_page_util.h"
- #include "chrome/browser/picture_in_picture/auto_picture_in_picture_tab_helper.h"
  #include "chrome/browser/screen_ai/screen_ai_install_state.h"
  #include "chrome/browser/themes/theme_service.h"
  #include "chrome/browser/themes/theme_service_factory.h"
@@ -23,14 +23,14 @@ index 3b45ad7952..0a40838982 100644
  #include "chrome/browser/ui/dialogs/browser_dialogs.h"
  #include "chrome/browser/ui/waap/waap_utils.h"
  #include "chrome/browser/ui/webui/chrome_content_browser_client_webui_part.h"
- #include "chrome/browser/ui/webui/util/webui_util_desktop.h"
-@@ -4242,20 +4243,33 @@ bool ShouldPromptOnMultipleMatchingCertificates(const Profile* profile) {
+ #include "chrome/browser/ui/webui/top_chrome/top_chrome_webui_user_profile.h"
+@@ -4260,20 +4261,33 @@ bool ShouldPromptOnMultipleMatchingCertificates(const Profile* profile) {
  
  }  // namespace
  
  base::OnceClosure ChromeContentBrowserClient::SelectClientCertificate(
      content::BrowserContext* browser_context,
-     int process_id,
+     content::ChildProcessId process_id,
      content::WebContents* web_contents,
      net::SSLCertRequestInfo* cert_request_info,
      net::ClientCertIdentityList client_certs,
@@ -43,7 +43,7 @@ index 3b45ad7952..0a40838982 100644
 +base::OnceClosure ChromeContentBrowserClient::SelectClientCertificateWithContext(
 +    content::NavigationOrDocumentHandle* navigation_or_document,
 +    content::BrowserContext* browser_context,
-+    int process_id,
++    content::ChildProcessId process_id,
 +    content::WebContents* web_contents,
 +    net::SSLCertRequestInfo* cert_request_info,
 +    net::ClientCertIdentityList client_certs,
@@ -58,7 +58,7 @@ index 3b45ad7952..0a40838982 100644
          prerender::FINAL_STATUS_SSL_CLIENT_CERTIFICATE_REQUESTED);
      return base::OnceClosure();
    }
-@@ -4380,29 +4394,34 @@ base::OnceClosure ChromeContentBrowserClient::SelectClientCertificate(
+@@ -4398,29 +4412,34 @@ base::OnceClosure ChromeContentBrowserClient::SelectClientCertificate(
    if (matching_certificates.empty() &&
        !CanPromptWithNonmatchingCertificates(profile)) {
      LOG(WARNING) << "No client cert matched by policy and user selection is "
@@ -98,7 +98,7 @@ index 3b45ad7952..0a40838982 100644
  }
  
  content::MediaObserver* ChromeContentBrowserClient::GetMediaObserver() {
-@@ -7533,20 +7552,26 @@ void ChromeContentBrowserClient::CreateSecurePaymentConfirmationService(
+@@ -7593,20 +7612,26 @@ void ChromeContentBrowserClient::CreateSecurePaymentConfirmationService(
    spc_keychain_access_group = kSecurePaymentConfirmationKeychainAccessGroup;
  #endif  // BUILDFLAG(IS_MAC)
    payments::CreateSecurePaymentConfirmationService(
@@ -126,16 +126,16 @@ index 3b45ad7952..0a40838982 100644
      content::BrowserContext* browser_context,
      const content::GlobalRequestID& request_id,
 diff --git a/chrome/browser/chrome_content_browser_client.h b/chrome/browser/chrome_content_browser_client.h
-index 8ba370793b..77c710db23 100644
+index f363c71769..88e46a71f6 100644
 --- a/chrome/browser/chrome_content_browser_client.h
 +++ b/chrome/browser/chrome_content_browser_client.h
-@@ -482,20 +482,28 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
+@@ -486,20 +486,28 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
  #if !BUILDFLAG(IS_ANDROID)
    bool ShouldDenyRequestOnCertificateError(const GURL main_page_url) override;
  #endif
    base::OnceClosure SelectClientCertificate(
        content::BrowserContext* browser_context,
-       int process_id,
+       content::ChildProcessId process_id,
        content::WebContents* web_contents,
        net::SSLCertRequestInfo* cert_request_info,
        net::ClientCertIdentityList client_certs,
@@ -143,7 +143,7 @@ index 8ba370793b..77c710db23 100644
 +  base::OnceClosure SelectClientCertificateWithContext(
 +      content::NavigationOrDocumentHandle* navigation_or_document,
 +      content::BrowserContext* browser_context,
-+      int process_id,
++      content::ChildProcessId process_id,
 +      content::WebContents* web_contents,
 +      net::SSLCertRequestInfo* cert_request_info,
 +      net::ClientCertIdentityList client_certs,
@@ -154,12 +154,12 @@ index 8ba370793b..77c710db23 100644
        content::RenderFrameHost* render_frame_host) override;
    bool IsUnboundedElementAllowed(
        content::RenderFrameHost* render_frame_host) override;
-   bool CanCreateWindow(content::RenderFrameHost* opener,
-                        const GURL& opener_url,
-                        const GURL& opener_top_level_frame_url,
-                        const url::Origin& source_origin,
+   // Returns true if `subframe` is an allowlisted extension allowed to use the
+   // Unbounded Element API and `outermost_main_frame` has a trusted origin,
+   // permitting the element to escape the root view's bounds.
+   bool IsUnboundedElementEscapingAllowed(
 diff --git a/content/browser/ssl/ssl_client_auth_handler.cc b/content/browser/ssl/ssl_client_auth_handler.cc
-index 3dc8c9b771..907c7ed832 100644
+index fcf911320e..8866ff05bc 100644
 --- a/content/browser/ssl/ssl_client_auth_handler.cc
 +++ b/content/browser/ssl/ssl_client_auth_handler.cc
 @@ -4,20 +4,21 @@
@@ -193,7 +193,7 @@ index 3dc8c9b771..907c7ed832 100644
  SSLClientAuthHandler::SSLClientAuthHandler(
      std::unique_ptr<net::ClientCertStore> client_cert_store,
      base::WeakPtr<BrowserContext> browser_context,
-     int process_id,
+     ChildProcessId process_id,
      base::WeakPtr<WebContents> web_contents,
 +    scoped_refptr<NavigationOrDocumentHandle> navigation_or_document,
      net::SSLCertRequestInfo* cert_request_info,
@@ -239,10 +239,10 @@ index 3dc8c9b771..907c7ed832 100644
  
  }  // namespace content
 diff --git a/content/browser/ssl/ssl_client_auth_handler.h b/content/browser/ssl/ssl_client_auth_handler.h
-index 8c3bfeb662..218ce875b4 100644
+index 40464edf37..5d9ab878a7 100644
 --- a/content/browser/ssl/ssl_client_auth_handler.h
 +++ b/content/browser/ssl/ssl_client_auth_handler.h
-@@ -17,20 +17,22 @@
+@@ -18,20 +18,22 @@
  #include "net/ssl/ssl_cert_request_info.h"
  
  namespace net {
@@ -265,16 +265,16 @@ index 8c3bfeb662..218ce875b4 100644
    // delete the handler when called.
    class Delegate {
     public:
-@@ -57,20 +59,22 @@ class SSLClientAuthHandler {
-   // destroyed. `web_contents` may be null for cases where the calling context
+@@ -59,20 +61,22 @@ class SSLClientAuthHandler {
    // is not associated with a document, such as service workers. If
    // `web_contents` is not null, it is guaranteed to be associated with the same
    // BrowserContext as `browser_context`.
    // `process_id` corresponds to the ID of the renderer process initiating the
-   // request.
+   // request. It is null if the initiating renderer is unknown, or if the
+   // request was initiated by the browser process.
    SSLClientAuthHandler(std::unique_ptr<net::ClientCertStore> client_cert_store,
                         base::WeakPtr<BrowserContext> browser_context,
-                        int process_id,
+                        ChildProcessId process_id,
                         base::WeakPtr<WebContents> web_contents,
 +                       scoped_refptr<NavigationOrDocumentHandle>
 +                           navigation_or_document,
@@ -288,7 +288,7 @@ index 8c3bfeb662..218ce875b4 100644
  
    // Selects a certificate and resumes the URL request with that certificate.
    void SelectCertificate();
-@@ -83,20 +87,21 @@ class SSLClientAuthHandler {
+@@ -85,20 +89,21 @@ class SSLClientAuthHandler {
  
    void DidGetClientCertsOnPostTask(net::ClientCertIdentityList client_certs);
  
@@ -297,7 +297,7 @@ index 8c3bfeb662..218ce875b4 100644
    base::OnceClosure cancellation_callback_;
  
    base::WeakPtr<BrowserContext> browser_context_;
-   const int process_id_;
+   const ChildProcessId process_id_;
    base::WeakPtr<WebContents> web_contents_;
 +  scoped_refptr<NavigationOrDocumentHandle> navigation_or_document_;
  
@@ -311,10 +311,10 @@ index 8c3bfeb662..218ce875b4 100644
    raw_ptr<Delegate> delegate_;
  
 diff --git a/content/browser/storage_partition_impl.cc b/content/browser/storage_partition_impl.cc
-index 7b69ec7f35..2e38497aea 100644
+index 969d2800a1..a545054d1f 100644
 --- a/content/browser/storage_partition_impl.cc
 +++ b/content/browser/storage_partition_impl.cc
-@@ -604,28 +604,30 @@ class LoginHandlerDelegate {
+@@ -606,28 +606,30 @@ class LoginHandlerDelegate {
  // after any of the SSLClientAuthHandler::Delegate methods are invoked (or when
  // a mojo connection error occurs).
  class SSLClientAuthDelegate : public SSLClientAuthHandler::Delegate {
@@ -323,7 +323,7 @@ index 7b69ec7f35..2e38497aea 100644
        mojo::PendingRemote<network::mojom::ClientCertificateResponder>
            client_cert_responder_remote,
        BrowserContext* browser_context,
-       int process_id,
+       ChildProcessId process_id,
        base::WeakPtr<WebContents> web_contents,
 +      scoped_refptr<NavigationOrDocumentHandle> navigation_or_document,
        const scoped_refptr<net::SSLCertRequestInfo>& cert_info)
@@ -345,12 +345,12 @@ index 7b69ec7f35..2e38497aea 100644
    }
  
    ~SSLClientAuthDelegate() override { DCHECK_CURRENTLY_ON(BrowserThread::UI); }
-@@ -2539,22 +2541,26 @@ void StoragePartitionImpl::OnCertificateRequested(
+@@ -2548,22 +2550,26 @@ void StoragePartitionImpl::OnCertificateRequested(
  
      if (context.navigation_or_document()) {
        auto* render_frame_host = context.navigation_or_document()->GetDocument();
        if (render_frame_host) {
-         process_id = render_frame_host->GetProcess()->GetDeprecatedID();
+         process_id = render_frame_host->GetProcess()->GetID();
        }
      }
    }
@@ -375,13 +375,13 @@ index 7b69ec7f35..2e38497aea 100644
    URLLoaderNetworkContext context =
        url_loader_network_observers_.current_context();
 diff --git a/content/public/browser/content_browser_client.cc b/content/public/browser/content_browser_client.cc
-index 92be4ef5f5..f1dd1ec2d7 100644
+index d127c0082c..08662b9f46 100644
 --- a/content/public/browser/content_browser_client.cc
 +++ b/content/public/browser/content_browser_client.cc
 @@ -756,20 +756,33 @@ bool ContentBrowserClient::ShouldDenyRequestOnCertificateError(
  base::OnceClosure ContentBrowserClient::SelectClientCertificate(
      BrowserContext* browser_context,
-     int process_id,
+     ChildProcessId process_id,
      WebContents* web_contents,
      net::SSLCertRequestInfo* cert_request_info,
      net::ClientCertIdentityList client_certs,
@@ -392,7 +392,7 @@ index 92be4ef5f5..f1dd1ec2d7 100644
 +base::OnceClosure ContentBrowserClient::SelectClientCertificateWithContext(
 +    NavigationOrDocumentHandle* navigation_or_document,
 +    BrowserContext* browser_context,
-+    int process_id,
++    ChildProcessId process_id,
 +    WebContents* web_contents,
 +    net::SSLCertRequestInfo* cert_request_info,
 +    net::ClientCertIdentityList client_certs,
@@ -413,10 +413,10 @@ index 92be4ef5f5..f1dd1ec2d7 100644
  }
  
 diff --git a/content/public/browser/content_browser_client.h b/content/public/browser/content_browser_client.h
-index 9a920eb24d..8e85133103 100644
+index afb78e0cca..597dcb4eff 100644
 --- a/content/public/browser/content_browser_client.h
 +++ b/content/public/browser/content_browser_client.h
-@@ -249,20 +249,21 @@ class BtmService;
+@@ -250,20 +250,21 @@ class BtmService;
  class DirectSocketsDelegate;
  class FeatureObserverClient;
  class FontAccessDelegate;
@@ -438,12 +438,12 @@ index 9a920eb24d..8e85133103 100644
  class ReceiverPresentationServiceDelegate;
  class RenderFrameHost;
  class RenderProcessHost;
-@@ -1244,20 +1245,31 @@ class CONTENT_EXPORT ContentBrowserClient {
-   // the certificate is auto-selected by policy). `process_id` corresponds to
-   // the ID of the renderer process initiating the request.
+@@ -1247,20 +1248,31 @@ class CONTENT_EXPORT ContentBrowserClient {
+   // initiating renderer is unknown, or if the request was initiated by the
+   // browser process.
    virtual base::OnceClosure SelectClientCertificate(
        BrowserContext* browser_context,
-       int process_id,
+       ChildProcessId process_id,
        WebContents* web_contents,
        net::SSLCertRequestInfo* cert_request_info,
        net::ClientCertIdentityList client_certs,
@@ -454,7 +454,7 @@ index 9a920eb24d..8e85133103 100644
 +  virtual base::OnceClosure SelectClientCertificateWithContext(
 +      NavigationOrDocumentHandle* navigation_or_document,
 +      BrowserContext* browser_context,
-+      int process_id,
++      ChildProcessId process_id,
 +      WebContents* web_contents,
 +      net::SSLCertRequestInfo* cert_request_info,
 +      net::ClientCertIdentityList client_certs,

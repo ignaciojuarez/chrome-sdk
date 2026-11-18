@@ -79,7 +79,7 @@ index ca391c1ee0..bb12d20ded 100644
                                    const GURL& requesting_origin,
                                    const GURL& embedding_origin,
 diff --git a/components/permissions/permission_request_manager.cc b/components/permissions/permission_request_manager.cc
-index 1fac8c9814..d76cf145aa 100644
+index ddbb3fcf56..45cc5ca77b 100644
 --- a/components/permissions/permission_request_manager.cc
 +++ b/components/permissions/permission_request_manager.cc
 @@ -193,6 +193,17 @@ tabs::TabInterface* GetTabInterface(content::WebContents* web_contents) {

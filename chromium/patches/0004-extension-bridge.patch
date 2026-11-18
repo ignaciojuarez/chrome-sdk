@@ -18,10 +18,10 @@ index 5fad1dddb6..c678b67b97 100644
  _ChromeMain
  _ChromeWebAppShortcutCopierMain
 diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
-index 4a9e8adf1c..b067ab64de 100644
+index 7261e13e19..5c9265a61b 100644
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
-@@ -1705,6 +1705,8 @@ source_set("core") {
+@@ -1807,6 +1807,8 @@ source_set("core") {
        "ui/cobble/cobble_client_certificates.mm",
        "ui/cobble/cobble_downloads.h",
        "ui/cobble/cobble_downloads.mm",

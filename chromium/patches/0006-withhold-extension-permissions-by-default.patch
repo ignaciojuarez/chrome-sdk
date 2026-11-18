@@ -1,5 +1,5 @@
 diff --git a/extensions/browser/unpacked_installer.cc b/extensions/browser/unpacked_installer.cc
-index 91814e1612..667b46c74b 100644
+index 642115f8e6..753535e307 100644
 --- a/extensions/browser/unpacked_installer.cc
 +++ b/extensions/browser/unpacked_installer.cc
 @@ -7,6 +7,7 @@
@@ -33,7 +33,7 @@ index 91814e1612..667b46c74b 100644
      result |= Extension::INSTALLED_VIA_CDP;
    }
 diff --git a/extensions/common/extension_features.cc b/extensions/common/extension_features.cc
-index 9652d229fb..f67b401ae3 100644
+index d0f9ea320d..cd6386fabe 100644
 --- a/extensions/common/extension_features.cc
 +++ b/extensions/common/extension_features.cc
 @@ -105,7 +105,7 @@ BASE_FEATURE(kApiDesktopAndroidNativeMessagingBypassExtensionAllowlist,
@@ -43,5 +43,5 @@ index 9652d229fb..f67b401ae3 100644
 -             base::FEATURE_DISABLED_BY_DEFAULT);
 +             base::FEATURE_ENABLED_BY_DEFAULT);
  
- BASE_FEATURE(kBlockBackgroundContentsOffExtentNavigation,
-              base::FEATURE_ENABLED_BY_DEFAULT);
+ BASE_FEATURE(kBackForwardCacheForComponentExtensionFrames,
+              base::FEATURE_DISABLED_BY_DEFAULT);

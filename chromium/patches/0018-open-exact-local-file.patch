@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index a836f9dfff..3b45ad7952 100644
+index c40564881c..1728c39e08 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -431,6 +431,7 @@
+@@ -435,6 +435,7 @@
  #include "services/network/public/cpp/features.h"
  #include "services/network/public/cpp/is_potentially_trustworthy.h"
  #include "services/network/public/cpp/network_switches.h"
@@ -10,7 +10,7 @@ index a836f9dfff..3b45ad7952 100644
  #include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
  #include "services/network/public/cpp/permissions_policy/permissions_policy_features.h"
  #include "services/network/public/cpp/resource_request.h"
-@@ -595,6 +596,7 @@
+@@ -591,6 +592,7 @@
  #include "chrome/browser/themes/theme_service_factory.h"
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/cobble/cobble_chromium.h"
@@ -18,7 +18,7 @@ index a836f9dfff..3b45ad7952 100644
  #include "chrome/browser/ui/cobble/cobble_prompts.h"
  #endif
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-@@ -5828,6 +5830,7 @@ void ChromeContentBrowserClient::CreateThrottlesForNavigation(
+@@ -5882,6 +5884,7 @@ void ChromeContentBrowserClient::CreateThrottlesForNavigation(
      content::NavigationThrottleRegistry& registry) {
    CreateAndAddChromeThrottlesForNavigation(registry);
  #if BUILDFLAG(IS_MAC)
@@ -26,7 +26,7 @@ index a836f9dfff..3b45ad7952 100644
    content::NavigationHandle& handle = registry.GetNavigationHandle();
    if (cobble_chromium::PageForWebContents(handle.GetWebContents()) &&
        handle.IsPost() && handle.GetReloadType() != content::ReloadType::NONE) {
-@@ -6443,6 +6446,13 @@ ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory(
+@@ -6497,6 +6500,13 @@ ChromeContentBrowserClient::CreateNonNetworkNavigationURLLoaderFactory(
        content::WebContents::FromFrameTreeNodeId(frame_tree_node_id);
    content::BrowserContext* browser_context = web_contents->GetBrowserContext();
  
@@ -40,7 +40,7 @@ index a836f9dfff..3b45ad7952 100644
  #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
    if (scheme == extensions::kExtensionScheme) {
      if (!ChromeContentBrowserClientExtensionsPart::
-@@ -6545,6 +6555,13 @@ void ChromeContentBrowserClient::
+@@ -6599,6 +6609,13 @@ void ChromeContentBrowserClient::
    DCHECK(browser_context);
    DCHECK(factories);
  
@@ -54,7 +54,7 @@ index a836f9dfff..3b45ad7952 100644
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
    if (content::AreIsolatedWebAppsEnabled(browser_context) &&
-@@ -6591,6 +6608,13 @@ void ChromeContentBrowserClient::
+@@ -6645,6 +6662,13 @@ void ChromeContentBrowserClient::
    DCHECK(browser_context);
    DCHECK(factories);
  
@@ -68,7 +68,7 @@ index a836f9dfff..3b45ad7952 100644
  #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
      BUILDFLAG(IS_CHROMEOS)
    if (content::AreIsolatedWebAppsEnabled(browser_context) &&
-@@ -6859,6 +6883,13 @@ void ChromeContentBrowserClient::
+@@ -6919,6 +6943,13 @@ void ChromeContentBrowserClient::
          int render_frame_id,
          const std::optional<url::Origin>& request_initiator_origin,
          NonNetworkURLLoaderFactoryMap* factories) {
@@ -83,7 +83,7 @@ index a836f9dfff..3b45ad7952 100644
      !BUILDFLAG(IS_ANDROID)
    content::RenderFrameHost* frame_host =
 diff --git a/chrome/browser/download/chrome_download_manager_delegate.cc b/chrome/browser/download/chrome_download_manager_delegate.cc
-index 67f567f9c8..6b4147179e 100644
+index d18db24b54..0cdc0223d3 100644
 --- a/chrome/browser/download/chrome_download_manager_delegate.cc
 +++ b/chrome/browser/download/chrome_download_manager_delegate.cc
 @@ -35,6 +35,7 @@
@@ -94,7 +94,7 @@ index 67f567f9c8..6b4147179e 100644
  #endif
  #include "chrome/browser/browser_process.h"
  #include "chrome/browser/download/download_core_service.h"
-@@ -2498,6 +2499,12 @@ void ChromeDownloadManagerDelegate::CheckDownloadAllowed(
+@@ -2568,6 +2569,12 @@ void ChromeDownloadManagerDelegate::CheckDownloadAllowed(
    }
  #endif
    content::WebContents* web_contents = web_contents_getter.Run();

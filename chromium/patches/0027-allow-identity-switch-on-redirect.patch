@@ -1,8 +1,8 @@
 diff --git a/content/browser/renderer_host/navigation_request.cc b/content/browser/renderer_host/navigation_request.cc
-index 6811b5d2f0..8d4eaa6d34 100644
+index ecdd16654a..3087d8ea97 100644
 --- a/content/browser/renderer_host/navigation_request.cc
 +++ b/content/browser/renderer_host/navigation_request.cc
-@@ -9068,6 +9068,12 @@ void NavigationRequest::OnWillRedirectRequestProcessed(
+@@ -9337,6 +9337,12 @@ void NavigationRequest::OnWillRedirectRequestProcessed(
  #else
        CHECK(is_safe_to_delete_);
        base::AutoReset<bool> resetter(&is_safe_to_delete_, false);
@@ -15,7 +15,7 @@ index 6811b5d2f0..8d4eaa6d34 100644
  #endif
        GetDelegate()->DidRedirectNavigation(this);
  #if BUILDFLAG(IS_ANDROID)
-@@ -11044,10 +11050,13 @@ void NavigationRequest::SetIsOverridingUserAgent(bool override_ua) {
+@@ -11320,10 +11326,13 @@ void NavigationRequest::SetIsOverridingUserAgent(bool override_ua) {
      return;
    }
  

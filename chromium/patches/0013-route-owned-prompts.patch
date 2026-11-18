@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index a67e10f90e..25baf851c1 100644
+index 531b365ddb..0cfaebe082 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -593,6 +593,7 @@
+@@ -589,6 +589,7 @@
  #include "chrome/browser/themes/theme_service_factory.h"
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/cobble/cobble_chromium.h"
@@ -10,7 +10,7 @@ index a67e10f90e..25baf851c1 100644
  #endif
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
-@@ -7433,6 +7434,14 @@ ChromeContentBrowserClient::CreateLoginDelegate(
+@@ -7493,6 +7494,14 @@ ChromeContentBrowserClient::CreateLoginDelegate(
      bool do_not_prompt_for_login,
      content::GuestPageHolder* guest,
      content::LoginDelegate::LoginAuthRequiredCallback auth_required_callback) {
@@ -26,10 +26,10 @@ index a67e10f90e..25baf851c1 100644
    // Negotiate challenge is handled via GSSAPI library, which can not receive
    // external credentials. However, on ChromeOS we can suggest the user to
 diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-index df8c2a1696..74946b6502 100644
+index db0667a4fc..65f9bb8033 100644
 --- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 +++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-@@ -119,6 +119,7 @@
+@@ -121,6 +121,7 @@
  
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/cobble/cobble_chromium.h"
@@ -37,7 +37,7 @@ index df8c2a1696..74946b6502 100644
  #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
  #include "ui/display/display.h"
  #include "ui/display/screen.h"
-@@ -1129,6 +1130,10 @@ void BrowserWebContentsDelegate::RendererResponsive(
+@@ -1184,6 +1185,10 @@ void BrowserWebContentsDelegate::RendererResponsive(
  content::JavaScriptDialogManager*
  BrowserWebContentsDelegate::GetJavaScriptDialogManager(
      content::WebContents* source) {
@@ -48,7 +48,7 @@ index df8c2a1696..74946b6502 100644
    return javascript_dialogs::TabModalDialogManager::FromWebContents(source);
  }
  
-@@ -1143,6 +1148,11 @@ void BrowserWebContentsDelegate::RunFileChooser(
+@@ -1198,6 +1203,11 @@ void BrowserWebContentsDelegate::RunFileChooser(
      content::RenderFrameHost* render_frame_host,
      scoped_refptr<content::FileSelectListener> listener,
      const blink::mojom::FileChooserParams& params) {
