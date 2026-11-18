@@ -25,9 +25,11 @@ outside Git and packaged runtimes outside the source checkout.
 
 **On each Chromium update:** run `scripts/update.py --write` on a branch, prepare a
 fresh `chromium-next` work directory, rebase the patches, then build, package and
-run the harness there. Only after that passes, delete the previous tree, rename
-`chromium-next` to the version-neutral `chromium`, and delete runtimes other than
-the current one and the one in the latest published app release.
+run the harness there. Only after that passes, delete the previous tree and
+rename `chromium-next` to the version-neutral `chromium`. Some dependency files
+record absolute paths, so compile once more (a few hundred steps), package and
+rerun the harness. Then delete runtimes other than the current one and the one
+in the latest published app release.
 
 ABI 19 adds screen sharing. `getDisplayMedia` arrives as a
 `ChromiumMediaPermissionRequest` whose kinds are `.display`; the host answers
