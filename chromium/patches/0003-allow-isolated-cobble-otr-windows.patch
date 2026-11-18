@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/profiles/profile.cc b/chrome/browser/profiles/profile.cc
-index f5c9ae68aa..49d66f6896 100644
+index 82b9a6f401..57115f9e5a 100644
 --- a/chrome/browser/profiles/profile.cc
 +++ b/chrome/browser/profiles/profile.cc
 @@ -108,6 +108,8 @@ constexpr char kPrimaryOTRProfileID[] = "profile::primary_otr";

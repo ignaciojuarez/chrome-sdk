@@ -206,7 +206,7 @@ implementation, and regression test are all required before enabling a surface.
 | B17 | Missing | Fuzzing/property coverage for ABI strings, JSON records, manifests and patch application |
 | B18 | Qualify | Developer ID signing, notarization, stapling, clean install, rollback and sustained everyday use |
 | B19 | Host | App update feed, release channels, source pin advancement and user-facing update UX |
-| B20 | Present | Rebased from 153.0.8010.37 to 157.0.8103.39 (Mac Stable, 2026-11-06); keep pace with each Stable milestone. Discovery can propose Early Stable builds served to 0.5% |
+| B20 | Present | Chromium 158.0.8127.37 (Mac Stable, 2026-11-18); keep pace with each Stable milestone. Discovery can propose Early Stable builds served to 0.5% |
 | B21 | Missing | Documented security-patch owner/response deadline and emergency runtime rollback exercise |
 | B22 | Missing | Automated native CI runner capacity sufficient for repeatable full SDK acceptance |
 
@@ -319,17 +319,13 @@ accessibility and IME qualification remain separate.
 No public release, real-account test, hardware permission grant, or signing/notarization
 qualification is implied by this audit.
 
-## Chromium 157 validation (2026-11-06)
+## Chromium 158 validation (2026-11-18)
 
-The 157.0.8103.39 rebase passed the isolated harness: 251 of 251 native checks,
+The 158.0.8127.37 rebase passed the isolated harness: 256 of 256 native checks,
 plus navigation, DOM, forms, rendering, WebGL2, downloads, clean shutdown and
-empty History tables. The harness found and drove four fixes: find request IDs
-(157 starts at zero), getDisplayMedia activation (Chrome's own rule), prompts of
-removed frames, and site-specific removal (HISTORY is all-sites only).
-
-Chromium 157 refuses page fullscreen unless the page view has focus in the key
-window, so the harness now focuses the page first, as a real click does. The
-former PiP, document PiP and display-media containment failures were the
-harness counting the page's own fullscreen window and AppKit Space windows as
-escapes; a new check requires that fullscreen window to close after exit.
+empty History tables. Two 158 changes needed SDK fixes: the app executable is
+now a minimal C launcher that links the framework directly, so the client is
+loaded at the start of `ChromeMain` (patch 0001), and renderer process IDs are
+typed `ChildProcessId` (patch 0021). Page fullscreen still requires the page
+view to have focus in the key window, as a real click provides.
 Real sites, hardware and release qualification remain open.

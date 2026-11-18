@@ -1,8 +1,8 @@
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 25baf851c1..520f84cd36 100644
+index 0cfaebe082..ffad0feac6 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
-@@ -1329,6 +1329,16 @@ void LaunchURL(
+@@ -1339,6 +1339,16 @@ void LaunchURL(
      }
    }
  

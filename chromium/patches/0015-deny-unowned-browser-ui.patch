@@ -36,7 +36,7 @@ index d13b97618b..41a66a648c 100644
    // base::CommandLine::ForCurrentProcess()->
    // HasSwitch(switches::kEnableWebBluetooth) is true.
 diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
-index 520f84cd36..a836f9dfff 100644
+index ffad0feac6..c40564881c 100644
 --- a/chrome/browser/chrome_content_browser_client.cc
 +++ b/chrome/browser/chrome_content_browser_client.cc
 @@ -32,6 +32,7 @@
@@ -47,7 +47,7 @@ index 520f84cd36..a836f9dfff 100644
  #include "base/memory/raw_ptr.h"
  #include "base/memory/scoped_refptr.h"
  #include "base/memory/self_deleting.h"
-@@ -371,6 +372,7 @@
+@@ -375,6 +376,7 @@
  #include "content/public/browser/isolated_web_apps_policy.h"
  #include "content/public/browser/legacy_tech_cookie_issue_details.h"
  #include "content/public/browser/navigation_handle.h"
@@ -55,7 +55,7 @@ index 520f84cd36..a836f9dfff 100644
  #include "content/public/browser/network_service_instance.h"
  #include "content/public/browser/permission_controller.h"
  #include "content/public/browser/permission_descriptor_util.h"
-@@ -4386,6 +4388,12 @@ base::OnceClosure ChromeContentBrowserClient::SelectClientCertificate(
+@@ -4404,6 +4406,12 @@ base::OnceClosure ChromeContentBrowserClient::SelectClientCertificate(
    // Note: It can happen that both lists are empty, still the selector needs to
    // be shown - see the comment in SSLClientAuthHandler::DidGetClientCerts()
    // about platforms not having a client cert store.
@@ -68,7 +68,7 @@ index 520f84cd36..a836f9dfff 100644
    net::ClientCertIdentityList client_cert_choices =
        !matching_certificates.empty() ? std::move(matching_certificates)
                                       : std::move(nonmatching_certificates);
-@@ -5749,9 +5757,84 @@ void ChromeContentBrowserClient::RemovePresentationObserver(
+@@ -5803,9 +5811,84 @@ void ChromeContentBrowserClient::RemovePresentationObserver(
    }
  }
  
@@ -154,7 +154,7 @@ index 520f84cd36..a836f9dfff 100644
  
  void ChromeContentBrowserClient::CreateThrottlesForCommitWithoutUrlLoader(
 diff --git a/chrome/browser/hid/chrome_hid_delegate.cc b/chrome/browser/hid/chrome_hid_delegate.cc
-index db8a46cb3d..4c724a5098 100644
+index 0d8f8fc223..49eb21fecb 100644
 --- a/chrome/browser/hid/chrome_hid_delegate.cc
 +++ b/chrome/browser/hid/chrome_hid_delegate.cc
 @@ -12,6 +12,7 @@
@@ -165,9 +165,9 @@ index db8a46cb3d..4c724a5098 100644
  #include "chrome/browser/hid/hid_chooser_context.h"
  #include "chrome/browser/hid/hid_chooser_context_factory.h"
  #include "chrome/browser/hid/hid_connection_tracker.h"
-@@ -37,6 +38,10 @@
- #include "chrome/browser/ui/android/device_dialog/hid_chooser_dialog_android.h"
- #endif  // BUILDFLAG(IS_ANDROID)
+@@ -43,6 +44,10 @@
+ #include "extensions/common/constants.h"
+ #endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE)
  
 +#if BUILDFLAG(IS_MAC)
 +#include "chrome/browser/ui/cobble/cobble_chromium.h"
@@ -175,8 +175,8 @@ index db8a46cb3d..4c724a5098 100644
 +
  #if BUILDFLAG(ENABLE_EXTENSIONS)
  #include "extensions/browser/guest_view/web_view/web_view_guest.h"
- #include "extensions/common/constants.h"
-@@ -299,6 +304,11 @@ std::unique_ptr<content::HidChooser> ChromeHidDelegate::RunChooser(
+ #include "extensions/common/extension_features.h"
+@@ -304,6 +309,11 @@ std::unique_ptr<content::HidChooser> ChromeHidDelegate::RunChooser(
  bool ChromeHidDelegate::CanRequestDevicePermission(
      content::BrowserContext* browser_context,
      const url::Origin& origin) {
@@ -189,7 +189,7 @@ index db8a46cb3d..4c724a5098 100644
           GetChooserContext(browser_context)->CanRequestObjectPermission(origin);
  }
 diff --git a/chrome/browser/payments/payment_request_factory.cc b/chrome/browser/payments/payment_request_factory.cc
-index 68313c3b71..824fc4775a 100644
+index 43a8ee3cac..2e564d45b3 100644
 --- a/chrome/browser/payments/payment_request_factory.cc
 +++ b/chrome/browser/payments/payment_request_factory.cc
 @@ -8,15 +8,21 @@
@@ -265,13 +265,13 @@ index 164657e853..f113d76ca6 100644
      return false;
    }
 diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-index 74946b6502..8b6b94c6f2 100644
+index 65f9bb8033..ce4a932b0a 100644
 --- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 +++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-@@ -5,6 +5,9 @@
- #include "chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h"
+@@ -6,6 +6,9 @@
  
  #include "base/check_deref.h"
+ #include "base/feature_list.h"
 +#include "base/functional/bind.h"
 +#include "base/memory/weak_ptr.h"
 +#include "base/task/sequenced_task_runner.h"
@@ -288,7 +288,7 @@ index 74946b6502..8b6b94c6f2 100644
  #include "content/public/browser/render_widget_host_view.h"
  #include "content/public/browser/site_instance.h"
  #include "content/public/browser/weak_document_ptr.h"
-@@ -300,9 +305,23 @@ const BrowserWebContentsDelegate* BrowserWebContentsDelegate::From(
+@@ -339,9 +344,23 @@ const BrowserWebContentsDelegate* BrowserWebContentsDelegate::From(
  
  BrowserWebContentsDelegate::~BrowserWebContentsDelegate() = default;
  
@@ -312,7 +312,7 @@ index 74946b6502..8b6b94c6f2 100644
    return PictureInPictureWindowManager::GetInstance()
        ->EnterVideoPictureInPicture(web_contents);
  }
-@@ -940,6 +959,46 @@ bool BrowserWebContentsDelegate::ShouldFocusPageAfterCrash(
+@@ -995,6 +1014,46 @@ bool BrowserWebContentsDelegate::ShouldFocusPageAfterCrash(
  
  void BrowserWebContentsDelegate::ShowRepostFormWarningDialog(
      content::WebContents* source) {
@@ -360,7 +360,7 @@ index 74946b6502..8b6b94c6f2 100644
        std::make_unique<RepostFormWarningController>(source), source);
  }
 diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h
-index 040961e3b6..d99234110e 100644
+index cb68c459f3..1da832e807 100644
 --- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h
 +++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h
 @@ -51,6 +51,7 @@ class BrowserWebContentsDelegate : public content::WebContentsDelegate {
@@ -372,7 +372,7 @@ index 040961e3b6..d99234110e 100644
        content::WebContents* web_contents) override;
    void ExitPictureInPicture() override;
 diff --git a/chrome/browser/ui/navigator/browser_navigator.cc b/chrome/browser/ui/navigator/browser_navigator.cc
-index 1e98a3d7cb..dbdd554067 100644
+index d5d5691f0b..2da0cbb064 100644
 --- a/chrome/browser/ui/navigator/browser_navigator.cc
 +++ b/chrome/browser/ui/navigator/browser_navigator.cc
 @@ -28,6 +28,9 @@
@@ -385,10 +385,10 @@ index 1e98a3d7cb..dbdd554067 100644
  #include "chrome/browser/ui/browser_init_state.h"
  #include "chrome/browser/ui/browser_ui_controller/browser_ui_controller.h"
  #include "chrome/browser/ui/browser_window.h"
-@@ -716,6 +719,11 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
+@@ -792,6 +795,11 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
    // allowed to open document PiP.  See `PictureInPictureWindowManager` for
    // details on what's allowed.
-   if (params->disposition == WindowOpenDisposition::NEW_PICTURE_IN_PICTURE) {
+   if (params->disposition == WindowOpenDisposition::kNewPictureInPicture) {
 +#if BUILDFLAG(IS_MAC)
 +    if (cobble_chromium::IsEnabled()) {
 +      return nullptr;
@@ -398,7 +398,7 @@ index 1e98a3d7cb..dbdd554067 100644
                            ? params->source_contents->GetLastCommittedURL()
                            : GURL();
 diff --git a/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc b/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc
-index 6f672ac21a..4b852600dd 100644
+index d3672a73a2..6082a74bca 100644
 --- a/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc
 +++ b/chrome/browser/ui/views/permissions/chooser_bubble_ui.cc
 @@ -7,6 +7,7 @@
@@ -409,7 +409,7 @@ index 6f672ac21a..4b852600dd 100644
  #include "chrome/browser/picture_in_picture/picture_in_picture_occlusion_tracker.h"
  #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
  #include "chrome/browser/platform_util.h"
-@@ -35,6 +36,10 @@
+@@ -36,6 +37,10 @@
  #include "ui/views/widget/widget.h"
  #include "ui/views/window/dialog_delegate.h"
  
@@ -420,7 +420,7 @@ index 6f672ac21a..4b852600dd 100644
  #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
  #include "chrome/browser/ui/views/extensions/chooser_dialog_view.h"
  #include "chrome/browser/ui/views/extensions/extensions_container_views.h"
-@@ -332,6 +337,12 @@ base::OnceClosure ShowDeviceChooserDialog(
+@@ -358,6 +363,12 @@ base::OnceClosure ShowDeviceChooserDialog(
    content::WeakDocumentPtr weak_document = owner->GetWeakDocumentPtr();
    auto* contents = content::WebContents::FromRenderFrameHost(owner);
  

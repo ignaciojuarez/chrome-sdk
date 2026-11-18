@@ -5,7 +5,7 @@ A native macOS SDK built on Chromium, with a Swift API for embedding the browser
 | | |
 | --- | --- |
 | ABI | 19 (development; matched runtime required) |
-| Engine | Chromium 157.0.8103.39, pinned in [`chromium.lock.json`](chromium.lock.json) |
+| Engine | Chromium 158.0.8127.37, pinned in [`chromium.lock.json`](chromium.lock.json) |
 | Platform | Apple Silicon macOS |
 | Source | Swift 6, Objective-C++, C++, Python |
 | Status | Development build; no release signing or notarization |
@@ -20,9 +20,16 @@ and validation limits. Existing APIs do not imply full Chrome UI compatibility.
 This public repository is the source of truth. Work on branches or temporary
 worktrees here; the former private SDK repository is archived. Cobble pins an
 exact SDK commit, and Full packaging requires that commit’s matched runtime,
-ABI, source lock and native-payload hashes. Keep one incremental Chromium work
-directory outside Git. Keep packaged runtimes outside the source checkout and
-retain one rollback runtime instead of copying source/build trees.
+ABI, source lock and native-payload hashes. Keep exactly one Chromium build tree
+outside Git and packaged runtimes outside the source checkout.
+
+**On each Chromium update:** run `scripts/update.py --write` on a branch, prepare a
+fresh `chromium-next` work directory, rebase the patches, then build, package and
+run the harness there. Only after that passes, delete the previous tree and
+rename `chromium-next` to the version-neutral `chromium`. Some dependency files
+record absolute paths, so compile once more (a few hundred steps), package and
+rerun the harness. Then delete runtimes other than the current one and the one
+in the latest published app release.
 
 ABI 19 adds screen sharing. `getDisplayMedia` arrives as a
 `ChromiumMediaPermissionRequest` whose kinds are `.display`; the host answers

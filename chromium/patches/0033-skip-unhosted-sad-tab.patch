@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/sad_tab_controller.cc b/chrome/browser/ui/sad_tab_controller.cc
-index 804a89c558..6e8b38e0b3 100644
+index 7a1dfbc6e4..6e8b38e0b3 100644
 --- a/chrome/browser/ui/sad_tab_controller.cc
 +++ b/chrome/browser/ui/sad_tab_controller.cc
 @@ -28,8 +28,12 @@ ContentsWebView* FindContentsWebView(content::WebContents* web_contents) {
@@ -9,7 +9,7 @@ index 804a89c558..6e8b38e0b3 100644
 +  // Cobble's host-owned AppKit windows have no BrowserView; its tabs report
 +  // renderer crashes through the SDK instead of a sad-tab view.
    BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
--  DCHECK(browser_view);
+-  CHECK(browser_view, base::NotFatalUntil::M162);
 +  if (!browser_view) {
 +    return nullptr;
 +  }

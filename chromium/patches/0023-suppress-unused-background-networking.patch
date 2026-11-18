@@ -31,10 +31,10 @@ index db99292ecd..53c3a67745 100644
      return config;
    }
 diff --git a/chrome/browser/browser_process_impl.cc b/chrome/browser/browser_process_impl.cc
-index 187e99b29b..b467d82285 100644
+index 3c239c749d..fa91325bf0 100644
 --- a/chrome/browser/browser_process_impl.cc
 +++ b/chrome/browser/browser_process_impl.cc
-@@ -81,6 +81,10 @@
+@@ -82,6 +82,10 @@
  #include "chrome/browser/printing/background_printing_manager.h"
  #include "chrome/browser/printing/print_job_manager.h"
  #include "chrome/browser/profiles/profile_manager.h"
@@ -45,7 +45,7 @@ index 187e99b29b..b467d82285 100644
  #include "chrome/browser/resource_coordinator/resource_coordinator_parts.h"
  #include "chrome/browser/serial/serial_policy_allowed_ports.h"
  #include "chrome/browser/shell_integration.h"
-@@ -1193,6 +1197,13 @@ BrowserProcessImpl::device_parental_controls() {
+@@ -1225,6 +1229,13 @@ BrowserProcessImpl::device_parental_controls() {
  }
  
  IntranetRedirectDetector* BrowserProcessImpl::intranet_redirect_detector() {
@@ -60,7 +60,7 @@ index 187e99b29b..b467d82285 100644
    if (!intranet_redirect_detector_) {
      intranet_redirect_detector_ = std::make_unique<IntranetRedirectDetector>();
 diff --git a/chrome/browser/chrome_browser_main.cc b/chrome/browser/chrome_browser_main.cc
-index 268afea521..52a2df1562 100644
+index 907d42dae0..552185dee0 100644
 --- a/chrome/browser/chrome_browser_main.cc
 +++ b/chrome/browser/chrome_browser_main.cc
 @@ -76,7 +76,9 @@
@@ -73,7 +73,7 @@ index 268afea521..52a2df1562 100644
  
  #if BUILDFLAG(IS_MAC)
  #include "chrome/browser/ui/cobble/cobble_chromium.h"
-@@ -834,6 +836,20 @@ std::unique_ptr<content::BrowserMainParts> ChromeBrowserMainParts::Create(
+@@ -835,6 +837,20 @@ std::unique_ptr<content::BrowserMainParts> ChromeBrowserMainParts::Create(
          switches::kNoStartupWindow);
      base::CommandLine::ForCurrentProcess()->AppendSwitch(
          switches::kDisableDefaultApps);
@@ -124,7 +124,7 @@ index a109f4abe6..f394818bd6 100644
  
  // On ChromeOS, IsGuestSession and IsRegularProfile() are not mutually
 diff --git a/chrome/browser/profiles/profile_manager.cc b/chrome/browser/profiles/profile_manager.cc
-index 9701dc8247..18cd4be30b 100644
+index 62f9cc39cc..27916008f0 100644
 --- a/chrome/browser/profiles/profile_manager.cc
 +++ b/chrome/browser/profiles/profile_manager.cc
 @@ -67,6 +67,9 @@
@@ -137,7 +137,7 @@ index 9701dc8247..18cd4be30b 100644
  #include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
  #include "chrome/browser/ui/ui_features.h"
  #include "chrome/browser/unified_consent/unified_consent_service_factory.h"
-@@ -1603,7 +1606,15 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
+@@ -1613,7 +1616,15 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
    NavigationPredictorKeyedServiceFactory::GetForProfile(profile);
  
    IdentityManagerFactory::GetForProfile(profile)->OnNetworkInitialized();
@@ -197,7 +197,7 @@ index bf8db216ef..71af5b47c3 100644
  }
  
 diff --git a/components/omnibox/browser/aim_eligibility_service.cc b/components/omnibox/browser/aim_eligibility_service.cc
-index 4f1ee1e285..7001db8e1b 100644
+index 1337973db0..fc549195ac 100644
 --- a/components/omnibox/browser/aim_eligibility_service.cc
 +++ b/components/omnibox/browser/aim_eligibility_service.cc
 @@ -323,7 +323,8 @@ AimEligibilityService::AimEligibilityService(
@@ -220,7 +220,7 @@ index 4f1ee1e285..7001db8e1b 100644
      return false;
    }
  
-@@ -727,6 +729,9 @@ AimEligibilityService::GetMostRecentResponseAuthMethod() const {
+@@ -738,6 +740,9 @@ AimEligibilityService::GetMostRecentResponseAuthMethod() const {
  }
  
  void AimEligibilityService::StartServerEligibilityRequestForDebugging() {
@@ -230,7 +230,7 @@ index 4f1ee1e285..7001db8e1b 100644
    pref_service_->SetBoolean(kManualOverridePrefName, false);
    pref_service_->SetTime(kManualOverrideTimestampPrefName, base::Time());
    StartServerEligibilityRequest(RequestSource::kUser, GetLocale());
-@@ -1082,6 +1087,9 @@ GURL AimEligibilityService::GetRequestUrl(
+@@ -1093,6 +1098,9 @@ GURL AimEligibilityService::GetRequestUrl(
  void AimEligibilityService::ScheduleServerEligibilityRequest(
      RequestSource request_source,
      const std::string& locale) {
@@ -240,7 +240,7 @@ index 4f1ee1e285..7001db8e1b 100644
    bool is_debounced = false;
    if (base::FeatureList::IsEnabled(omnibox::kAimEligibilityServiceDebounce)) {
      if (request_debounce_timer_.IsRunning()) {
-@@ -1100,6 +1108,9 @@ void AimEligibilityService::ScheduleServerEligibilityRequest(
+@@ -1111,6 +1119,9 @@ void AimEligibilityService::ScheduleServerEligibilityRequest(
  void AimEligibilityService::StartServerEligibilityRequest(
      RequestSource request_source,
      const std::string& locale) {
@@ -251,7 +251,7 @@ index 4f1ee1e285..7001db8e1b 100644
      return;
    }
 diff --git a/components/omnibox/browser/aim_eligibility_service.h b/components/omnibox/browser/aim_eligibility_service.h
-index 6c91ed4b04..eeb5eeb995 100644
+index 5ee835a511..b9282f30bc 100644
 --- a/components/omnibox/browser/aim_eligibility_service.h
 +++ b/components/omnibox/browser/aim_eligibility_service.h
 @@ -106,6 +106,10 @@ class AimEligibilityService

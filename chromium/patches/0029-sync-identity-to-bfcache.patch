@@ -1,8 +1,8 @@
 diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
-index a2704216f1..1474b6e07e 100644
+index a2638c29d4..9337d1f7e6 100644
 --- a/content/browser/web_contents/web_contents_impl.cc
 +++ b/content/browser/web_contents/web_contents_impl.cc
-@@ -4340,6 +4340,17 @@ void WebContentsImpl::SyncRendererPrefs() {
+@@ -4322,6 +4322,17 @@ void WebContentsImpl::SyncRendererPrefs() {
    ExecutePageBroadcastMethodForAllPages([this](RenderViewHostImpl* rvh) {
      rvh->SendRendererPreferencesToRenderer(GetRendererPrefs(rvh));
    });

@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
-index 8b6b94c6f2..edec81870a 100644
+index ce4a932b0a..6e781f513b 100644
 --- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 +++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
 @@ -4,6 +4,10 @@
@@ -11,9 +11,9 @@ index 8b6b94c6f2..edec81870a 100644
 +#endif
 +
  #include "base/check_deref.h"
+ #include "base/feature_list.h"
  #include "base/functional/bind.h"
- #include "base/memory/weak_ptr.h"
-@@ -1161,6 +1165,9 @@ void BrowserWebContentsDelegate::WebContentsCreated(
+@@ -1216,6 +1220,9 @@ void BrowserWebContentsDelegate::WebContentsCreated(
    // to track `new_contents` after it is added to its TabModel this override can
    // be removed.
    CreateSessionServiceTabHelper(new_contents);

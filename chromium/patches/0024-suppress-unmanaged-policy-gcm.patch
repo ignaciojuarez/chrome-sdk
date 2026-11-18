@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
-index 953895a36b..ca6c5cc0dd 100644
+index 5f186ab5a0..2605df1e44 100644
 --- a/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
 +++ b/chrome/browser/policy/cloud/user_cloud_policy_invalidator.cc
 @@ -11,6 +11,9 @@
@@ -25,8 +25,8 @@ index 953895a36b..ca6c5cc0dd 100644
  #endif
  }
  
-@@ -87,10 +91,38 @@ void UserCloudPolicyInvalidator::OnProfileInitializationComplete(
-   DCHECK(profile_observation_.IsObservingSource(profile));
+@@ -88,10 +92,38 @@ void UserCloudPolicyInvalidator::OnProfileInitializationComplete(
+         base::NotFatalUntil::M162);
    profile_observation_.Reset();
  
 -  // Initialize now that profile creation is complete and the invalidation
@@ -67,7 +67,7 @@ index 953895a36b..ca6c5cc0dd 100644
    if (!invalidation_provider) {
      return;
    }
-@@ -104,4 +136,14 @@ void UserCloudPolicyInvalidator::OnProfileInitializationComplete(
+@@ -105,4 +137,14 @@ void UserCloudPolicyInvalidator::OnProfileInitializationComplete(
        base::DefaultClock::GetInstance());
  }
  

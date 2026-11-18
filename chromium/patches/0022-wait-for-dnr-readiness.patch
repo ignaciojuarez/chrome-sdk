@@ -1,8 +1,8 @@
 diff --git a/extensions/browser/api/declarative_net_request/rules_monitor_service.cc b/extensions/browser/api/declarative_net_request/rules_monitor_service.cc
-index 69ead3d603..311b619a30 100644
+index 3c51b72f38..73f61862e1 100644
 --- a/extensions/browser/api/declarative_net_request/rules_monitor_service.cc
 +++ b/extensions/browser/api/declarative_net_request/rules_monitor_service.cc
-@@ -457,6 +457,15 @@ void RulesMonitorService::GetDisabledRuleIds(
+@@ -458,6 +458,15 @@ void RulesMonitorService::GetDisabledRuleIds(
        std::move(callback));
  }
  
@@ -18,7 +18,7 @@ index 69ead3d603..311b619a30 100644
  const base::ListValue& RulesMonitorService::GetSessionRulesValue(
      const ExtensionId& extension_id) const {
    static const base::NoDestructor<base::ListValue> empty_rules;
-@@ -573,6 +582,8 @@ void RulesMonitorService::OnExtensionLoaded(
+@@ -574,6 +583,8 @@ void RulesMonitorService::OnExtensionLoaded(
      return;
    }
  
@@ -27,7 +27,7 @@ index 69ead3d603..311b619a30 100644
    LoadRequestData load_data(extension->id(), extension->version(),
                              LoadRulesetRequestSource::kOnExtensionLoad);
    int expected_ruleset_checksum;
-@@ -615,6 +626,7 @@ void RulesMonitorService::OnExtensionLoaded(
+@@ -616,6 +627,7 @@ void RulesMonitorService::OnExtensionLoaded(
      if (ruleset_failed_to_load) {
        warning_service_->AddWarnings(
            {Warning::CreateRulesetFailedToLoadWarning(load_data.extension_id)});
@@ -35,7 +35,7 @@ index 69ead3d603..311b619a30 100644
      }
    }
  
-@@ -674,6 +686,7 @@ void RulesMonitorService::OnExtensionUnloaded(
+@@ -675,6 +687,7 @@ void RulesMonitorService::OnExtensionUnloaded(
    // should just be ignored now given the extension is being unloaded.
    update_enabled_rulesets_queue_map_.erase(extension->id());
    update_dynamic_or_session_rules_queue_map_.erase(extension->id());
@@ -43,7 +43,7 @@ index 69ead3d603..311b619a30 100644
  
    // Notify the `file_sequence_bridge_` to invalidate any loads that started
    // before the extension was unloaded.
-@@ -984,6 +997,22 @@ void RulesMonitorService::GetDisabledRuleIdsInternal(
+@@ -985,6 +998,22 @@ void RulesMonitorService::GetDisabledRuleIdsInternal(
        std::vector<int>(disabled_rule_ids.begin(), disabled_rule_ids.end()));
  }
  
@@ -66,7 +66,7 @@ index 69ead3d603..311b619a30 100644
  void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
      LoadRequestData load_data) {
    if (test_observer_) {
-@@ -1034,6 +1063,7 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
+@@ -1035,6 +1064,7 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
    RuleCounts static_rule_count;
    bool notify_ruleset_failed_to_load = false;
    bool global_rule_limit_exceeded = false;
@@ -74,7 +74,7 @@ index 69ead3d603..311b619a30 100644
  
    RuleCounts static_rule_limit(
        global_rules_tracker_.GetAvailableAllocation(load_data.extension_id) +
-@@ -1069,6 +1099,7 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
+@@ -1070,6 +1100,7 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
  
      if (new_ruleset_count.regex_rule_count >
          static_rule_limit.regex_rule_count) {
@@ -82,7 +82,7 @@ index 69ead3d603..311b619a30 100644
        continue;
      }
  
-@@ -1091,6 +1122,11 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
+@@ -1092,6 +1123,11 @@ void RulesMonitorService::OnInitialRulesetsLoadedFromDisk(
              load_data.extension_id)});
    }
  
